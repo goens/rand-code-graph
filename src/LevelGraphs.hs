@@ -1,6 +1,8 @@
 {-# LANGUAGE ViewPatterns  #-}
--- | Code for generating a maze from a randomized graph traversal. A
---   maze is just represented by a list of the walls to draw.
+-- | Code for generating random level-graphs, a sort of generalization of trees
+--   and generating lisp/haskell code following the structure of the graphs.
+--   This is part of a project for efficient IO batching using 
+--   Ohua (https://bitbucket.org/sertel/ohua), and compare it with Muse and Haxl.
 -- 
 --   Andres Goens, TU Dresden, Chair for Compiler Construction
 --   andres.goens@tu-dresden.de
