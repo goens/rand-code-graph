@@ -16,7 +16,7 @@ import qualified Data.Graph.Inductive as Graph
 import           Data.Graph.Inductive (Gr)
 import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
-
+import qualified Data.Tuple           as Tuple 
 
 data ComputationType = DataSource | OtherComputation deriving (Show, Eq)
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
@@ -211,22 +211,10 @@ randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivial
 -- Test Area
 ------------------------------------------------------------
 
+-- This works only for level graphs from the defining property for edges
+lGraphTopSort :: LevelGraph -> [Graph.LNode Level]
+lGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
 
-kahnTopSort :: Gr a b -> [Graph.LNode a]
-kahnTopSort graph = reverse $ helperKahn [] [ (node,label) | (node,label) <- allnodes, (null $ Graph.suc graph node) ]
-  where
-    allnodes = Graph.labNodes graph
-    helperKahn l [] = l
-    helperKahn l (s:ss)  = 
-        helperKahn (s:l) ss
-
-dfs :: Graph.Node -> Gr n e -> [Graph.Node]
-dfs start graph = go [start] graph
-  where go [] _                           = []
-        go _ g | Graph.isEmpty g          = []
-        go (n:ns) (Graph.match n -> (Just c, g)) =
-          n : go (Graph.neighbors' c ++ ns) g
-        go (_:ns) g                       = go ns g
 
 
 -- codeGraphNodetoLisp :: Graph.LNode (Level,ComputationType) -> String
@@ -241,8 +229,6 @@ dfs start graph = go [start] graph
 --      TO-DO
 -- ----------------
 -- Code Generation:
---   - Topological sort with levels: get a list of variables and their order 
---     (maybe as a LevelGraph/CodeGraph specific top.sort algorithm)
 --   - Convert topologically-sorted list of nodes using graph (for edges) 
 --     into lisp code using the same concept as in the example with nested lets
 --   - Repeat process for generating Haskell (Haxl) code (start with example)
