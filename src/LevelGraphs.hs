@@ -11,7 +11,7 @@
 module LevelGraphs where
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
-import           Control.Monad.Random (MonadRandom,fromList)
+import           Control.Monad.Random (MonadRandom,fromList, evalRandIO)
 
 import qualified System.Random        (mkStdGen, setStdGen)
 
@@ -53,15 +53,33 @@ intMap f gr = Graph.buildGr $ List.map (intMapNode f) $ Graph.ufold (:) [] gr
 minLevel :: LevelGraph -> Level
 minLevel = minimum . (map snd) . Graph.labNodes
 
+getLevelCGN :: (Int,CodeGraphNodeLabel) -> Level
+getLevelCGN = ((\(CodeGraphNodeLabel (lvl,_)) -> lvl ) . snd)
+
 minLevelCG :: CodeGraph -> Level
-minLevelCG = minimum . (map ((\(CodeGraphNodeLabel (lvl,_)) -> lvl ) . snd)) . Graph.labNodes
+minLevelCG = minimum . (map getLevelCGN) . Graph.labNodes
 
 -- This works only for level graphs from the defining property for edges
 lGraphTopSort :: LevelGraph -> [Graph.LNode Level]
 lGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
 
+lGraphLevelSort :: LevelGraph -> [[Graph.LNode Level]]
+lGraphLevelSort graph = [ subList l | l <- levels ]
+  where 
+    topSort = lGraphTopSort graph
+    levels = List.nub $ map snd topSort
+    subList l = [ (node,l) | (node,l') <- topSort, l'==l]
+
 cGraphTopSort :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
 cGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
+
+cGraphLevelSort :: CodeGraph -> [[Graph.LNode CodeGraphNodeLabel]]
+cGraphLevelSort graph = [ subList l | l <- levels ]
+  where 
+    topSort = cGraphTopSort graph
+    levels = List.nub $ map getLevelCGN topSort
+    subList l = [ (node,CodeGraphNodeLabel (l',ctype)) |  (node,CodeGraphNodeLabel (l',ctype)) <- topSort, l'==l]
+
 
 ------------------------------------------------------------
 -- Random-monad helper functions
@@ -214,6 +232,44 @@ genRandomCodeGraph probMap dataSourceProb edgesPerLevel =
   in 
     levelGraph >>= (makeRandomCodeGraph dataSourceProb)
 
+------------------------------------------------------------
+-- Lisp Backend
+------------------------------------------------------------
+
+nodeToUniqueName :: Graph.Node -> String
+nodeToUniqueName =  (++) "functionCallNo" . show
+
+cgNodeToLispFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
+    "(datasource \"foo\" 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "(somethingelse 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+
+cgNodeToLispLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToLispLetDef graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ (cgNodeToLispFunction (Graph.suc graph $ fst x) x))
+
+-- assumes the level graph is connected!
+-- assumes the lowest level has exactly one element!
+-- (otherwise there is no call in the end)
+
+toLispCode :: CodeGraph -> String
+toLispCode graph = helperToLispCode nodes ++ "\n"
+    where 
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levelToLisp levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToLispLetDef graph) levelNodes) ++ "]"
+      helperToLispCode [] = ""
+      helperToLispCode [[lastLvlNode]] = cgNodeToLispFunction (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToLispCode (lvl:lvls) = "(" ++ (levelToLisp lvl) ++ "\n" ++ (helperToLispCode lvls) ++ ")"
+
+toLispCodeWrapped :: String -> CodeGraph -> String
+toLispCodeWrapped testname graph = "(defn " ++ testname ++ " []\n" ++ toLispCode graph ++ ")" 
+
+concatenateTests :: [ CodeGraph ] -> String
+concatenateTests randomGraphs = singleString
+    where
+      randomGraphsNumbered = zip [1..] randomGraphs
+      strings = map (\(x,y) -> toLispCodeWrapped ("run-test" ++ show x) y) randomGraphsNumbered
+      singleString = List.intercalate "\n" strings
 
 ------------------------------------------------------------
 -- Examples
@@ -232,21 +288,34 @@ exampleMap = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..10], b<-[1..10], a<
 randomExample :: MonadRandom m => m LevelGraph
 randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivialLevelGraph 2 3) 
 
+randomCodeGraphExample :: MonadRandom m => m CodeGraph
+randomCodeGraphExample = genRandomCodeGraph exampleMap 0.6 [2,2,3]
+
+
+
+someExampleStrings :: MonadRandom m => m String
+someExampleStrings = liftM concatenateTests $ sequence (List.replicate 10 randomCodeGraphExample)
+
+--  graphs <- Control.Monad.Random.evalRandIO singleString
+--  putStrLn graphs
+
 
 ------------------------------------------------------------
 -- Test Area
 ------------------------------------------------------------
 
-
-
-
 -- codeGraphNodetoLisp :: Graph.LNode (Level,ComputationType) -> String
 -- codeGraphNodetoLisp (a,b,(level,ctype)) = case ctype of DataSource -> "foo"
 --                                                         OtherComputation -> "bar"
 
--- toLispCode :: CodeGraph -> String
--- toLispCode gr = "foo"
 
+-- ----------------
+--      main
+-- ----------------
+main :: IO ()
+main = do
+  str <- Control.Monad.Random.evalRandIO someExampleStrings
+  putStrLn str
 
 -- ----------------
 --      TO-DO
@@ -256,8 +325,7 @@ randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivial
 --     into lisp code using the same concept as in the example with nested lets
 --   - Repeat process for generating Haskell (Haxl) code (start with example)
 --
--- Random staistics:
---   - Add seeds for reproducibility
+-- Random statistics:
 --   - Create some larger test-suite generating functions
 --
 --     OPTIONAL:
