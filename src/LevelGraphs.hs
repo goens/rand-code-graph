@@ -320,13 +320,16 @@ main = do
 -- ----------------
 --      TO-DO
 -- ----------------
+-- Graph Types:
+--   - Make CodeGraphs have (nested) if-clauses
+--   - Make Graphs with DataSinks (like sources)
+-- 
 -- Code Generation:
---   - Convert topologically-sorted list of nodes using graph (for edges) 
---     into lisp code using the same concept as in the example with nested lets
---   - Repeat process for generating Haskell (Haxl) code (start with example)
+--   - Make a Haskell (Haxl) example out of the Lisp example
+--   - Adapt backend based on example for generating Haskell (Haxl) code 
 --
 -- Random statistics:
---   - Create some larger test-suite generating functions
+--   - Create some larger test-suite generating functions: include just increasing number of levels
 --
 --     OPTIONAL:
 --
