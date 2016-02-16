@@ -58,6 +58,7 @@ library
   -- Other library packages from which modules are imported.
   build-depends:       base,
                        MonadRandom,
+                       random,
                        fgl,
                        containers
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE ViewPatterns  #-}
+{-# LANGUAGE FlexibleInstances #-}
 -- | Code for generating random level-graphs, a sort of generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
 --   This is part of a project for efficient IO batching using 
@@ -12,6 +13,8 @@ module LevelGraphs where
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
 import           Control.Monad.Random (MonadRandom,fromList)
 
+import qualified System.Random        (mkStdGen, setStdGen)
+
 import qualified Data.Graph.Inductive as Graph
 import           Data.Graph.Inductive (Gr)
 import qualified Data.List            as List
@@ -21,11 +24,19 @@ import qualified Data.Tuple           as Tuple
 data ComputationType = DataSource | OtherComputation deriving (Show, Eq)
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
-
 type Level = Int
-type LevelGraph = Gr Level () -- There can only be edges (a,b) if level a < level b
-type CodeGraph = Gr (Level,ComputationType) ()
 
+newtype CodeGraphNodeLabel = CodeGraphNodeLabel (Level,ComputationType) deriving (Show,Eq)
+
+type LevelGraph = Gr Level () -- There can only be edges (a,b) if level a < level b
+type CodeGraph = Gr CodeGraphNodeLabel ()
+
+
+instance Ord CodeGraphNodeLabel where
+    (<=) (CodeGraphNodeLabel (lvl,_)) (CodeGraphNodeLabel (lvl',_)) = lvl <= lvl'
+
+-- instance Eq CodeGraphNodeLabel where
+--     (==) (CodeGraphNodeLabel (lvl,ctype)) (CodeGraphNodeLabel (lvl',ctype')) = lvl == lvl' && ctype == ctype'
 ------------------------------------------------------------
 -- General helper functions
 ------------------------------------------------------------
@@ -39,9 +50,25 @@ intMapNode f (p,n,l,s) = (f' p, f n, l, f' s)
 intMap :: (Int -> Int) -> Gr a b -> Gr a b
 intMap f gr = Graph.buildGr $ List.map (intMapNode f) $ Graph.ufold (:) [] gr
 
+minLevel :: LevelGraph -> Level
+minLevel = minimum . (map snd) . Graph.labNodes
+
+minLevelCG :: CodeGraph -> Level
+minLevelCG = minimum . (map ((\(CodeGraphNodeLabel (lvl,_)) -> lvl ) . snd)) . Graph.labNodes
+
+-- This works only for level graphs from the defining property for edges
+lGraphTopSort :: LevelGraph -> [Graph.LNode Level]
+lGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
+
+cGraphTopSort :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
+cGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
+
 ------------------------------------------------------------
 -- Random-monad helper functions
 ------------------------------------------------------------
+
+setSeed :: Int -> IO ()
+setSeed = System.Random.setStdGen . System.Random.mkStdGen 
 
 rconcat :: MonadRandom m => m [a] -> m [a] -> m [a]
 rconcat = liftM2 (++)
@@ -78,8 +105,8 @@ elemWithProbMap ((e,p):es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProbMap
 addLevelContext :: Level -> Graph.Context () b -> Graph.Context Level b
 addLevelContext level (pre,node,(),after) = (pre,node,level,after)
 
-addCodeContext :: ComputationType -> Graph.Context Level b -> Graph.Context (Level,ComputationType) b
-addCodeContext ctype (pre,node,lvl,after) = (pre,node,(lvl,ctype),after)
+addCodeContext :: ComputationType -> Graph.Context Level b -> Graph.Context CodeGraphNodeLabel b
+addCodeContext ctype (pre,node,lvl,after) = (pre,node,CodeGraphNodeLabel (lvl,ctype),after)
 
 graph2LevelGraph ::  Level -> Gr () () -> LevelGraph
 graph2LevelGraph level gr = Graph.buildGr (List.map (addLevelContext level) unfolded)
@@ -89,7 +116,7 @@ qlEdge2Edge :: Graph.LEdge () -> Graph.Edge
 qlEdge2Edge (a,b,()) = (a,b)
 
 makeCodeGraph :: ComputationType -> LevelGraph -> CodeGraph
-makeCodeGraph ctype = Graph.nmap (\l -> (l,ctype) ) 
+makeCodeGraph ctype = Graph.nmap (\l -> CodeGraphNodeLabel (l,ctype) ) 
 
 -- Makes a level graph into a code graph with a probability p for being a DataSource for every node
 makeRandomCodeGraph :: MonadRandom m => Double -> LevelGraph -> m CodeGraph 
@@ -108,8 +135,6 @@ makeGraphRooted rootlabel graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootlab
       oldNodes = Graph.labNodes graph
       oldNodes' = map fst $ Graph.labNodes graph
       newEdges = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
-
-
 
 ------------------------------------------------------------
 -- Basic graph families
@@ -184,7 +209,8 @@ genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> Double -> [In
 genRandomCodeGraph probMap dataSourceProb edgesPerLevel = 
   let
       levelGraphList = zipWith trivialLevelGraph [1..] edgesPerLevel
-      levelGraph = Control.Monad.foldM (joinLevelGraphRandom probMap) (trivialLevelGraph 0 0) levelGraphList
+      levelGraph' = Control.Monad.foldM (joinLevelGraphRandom probMap) (trivialLevelGraph 0 0) levelGraphList
+      levelGraph = Control.Monad.liftM2 makeGraphRooted (liftM (pred . minLevel) levelGraph') levelGraph'
   in 
     levelGraph >>= (makeRandomCodeGraph dataSourceProb)
 
@@ -211,9 +237,6 @@ randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivial
 -- Test Area
 ------------------------------------------------------------
 
--- This works only for level graphs from the defining property for edges
-lGraphTopSort :: LevelGraph -> [Graph.LNode Level]
-lGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
 
 
 
