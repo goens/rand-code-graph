@@ -5,7 +5,29 @@
 --   This is part of a project for efficient IO batching using 
 --   Ohua (https://bitbucket.org/sertel/ohua), and compare it with Muse and Haxl.
 -- 
---   Andres Goens, TU Dresden, Chair for Compiler Construction
+--
+--
+--         CCCCCCCCCCCCC        CCCCCCCCCCCCC        CCCCCCCCCCCCC
+--      CCC::::::::::::C     CCC::::::::::::C     CCC::::::::::::C
+--    CC:::::::::::::::C   CC:::::::::::::::C   CC:::::::::::::::C
+--   C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C
+--  C:::::C       CCCCCC C:::::C       CCCCCC C:::::C       CCCCCC
+-- C:::::C              C:::::C              C:::::C              
+-- C:::::C              C:::::C              C:::::C              
+-- C:::::C              C:::::C              C:::::C              
+-- C:::::C              C:::::C              C:::::C              
+-- C:::::C              C:::::C              C:::::C              
+-- C:::::C              C:::::C              C:::::C              
+--  C:::::C       CCCCCC C:::::C       CCCCCC C:::::C       CCCCCC
+--   C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C
+--    CC:::::::::::::::C   CC:::::::::::::::C   CC:::::::::::::::C
+--      CCC::::::::::::C     CCC::::::::::::C     CCC::::::::::::C
+--         CCCCCCCCCCCCC        CCCCCCCCCCCCC        CCCCCCCCCCCCC
+--                                                              
+--   ------------- Chair for Compiler Construction ---------------
+--   ---------------------- TU Dresden --------------------------
+--
+--   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
 module LevelGraphs where
