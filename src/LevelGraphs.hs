@@ -291,7 +291,7 @@ someExample = makeCodeGraph DataSource $ joinLevelGraph (trivialLevelGraph 2 2) 
 
 exampleMap :: Map.Map (Int,Int) Double
 --exampleMap = Map.fromList [ ((1,2),0.5), ((1,3),0.2), ((1,4),0.05) ]
-exampleMap = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..10], b<-[1..10], a<b]
+exampleMap = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..50], b<-[1..50], a<b]
 
 randomExample :: MonadRandom m => m LevelGraph
 randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivialLevelGraph 2 3) 
@@ -299,10 +299,15 @@ randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivial
 randomCodeGraphExample :: MonadRandom m => m CodeGraph
 randomCodeGraphExample = genRandomCodeGraph exampleMap [0.4,0.1] [2,2,3]
 
-
+randomCodeGraphExampleVarLength :: MonadRandom m => Int -> m CodeGraph
+randomCodeGraphExampleVarLength n = (sequence $ replicate n (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraph exampleMap [0.4,0.1]
 
 someExampleStrings :: MonadRandom m => m String
 someExampleStrings = liftM concatenateTests $ sequence (List.replicate 10 randomCodeGraphExample)
+
+someExampleStringsVarLength :: MonadRandom m => m String
+someExampleStringsVarLength = liftM concatenateTests $ sequence (map randomCodeGraphExampleVarLength [1..20])
+
 
 --  graphs <- Control.Monad.Random.evalRandIO singleString
 --  putStrLn graphs
@@ -322,7 +327,7 @@ someExampleStrings = liftM concatenateTests $ sequence (List.replicate 10 random
 -- ----------------
 main :: IO ()
 main = do
-  str <- Control.Monad.Random.evalRandIO someExampleStrings
+  str <- Control.Monad.Random.evalRandIO someExampleStringsVarLength
   putStrLn str
 
 -- ----------------
