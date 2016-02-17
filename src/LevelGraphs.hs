@@ -21,7 +21,7 @@ import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple 
 
-data ComputationType = DataSource | OtherComputation deriving (Show, Eq)
+data ComputationType = DataSource | SideEffect | OtherComputation deriving (Show, Eq)
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
 type Level = Int
@@ -100,6 +100,11 @@ trueWithProb p = let p' = toRational p in Control.Monad.Random.fromList [ (True,
 dsWithProb :: MonadRandom m => Double -> m ComputationType
 dsWithProb p = let p' = toRational p in Control.Monad.Random.fromList [ (DataSource, p'), (OtherComputation, (1 - p')) ]
 
+ctWithProb :: MonadRandom m => [Double] -> m ComputationType
+ctWithProb ps = 
+    let
+        ps' = map toRational ps 
+    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation] (ps' ++ [1 - (sum ps')]) 
 
 emptyWithProb :: MonadRandom m => Double -> [a] -> m [a]
 emptyWithProb p list = let p' = toRational p in Control.Monad.Random.fromList [ (list, p'), ([], (1 - p')) ]
@@ -137,11 +142,11 @@ makeCodeGraph :: ComputationType -> LevelGraph -> CodeGraph
 makeCodeGraph ctype = Graph.nmap (\l -> CodeGraphNodeLabel (l,ctype) ) 
 
 -- Makes a level graph into a code graph with a probability p for being a DataSource for every node
-makeRandomCodeGraph :: MonadRandom m => Double -> LevelGraph -> m CodeGraph 
-makeRandomCodeGraph probDataSource gr = liftM Graph.buildGr transformed
+makeRandomCodeGraph :: MonadRandom m => [Double] -> LevelGraph -> m CodeGraph 
+makeRandomCodeGraph probsCT gr = liftM Graph.buildGr transformed
     where 
       unfolded = Graph.ufold (:) [] gr
-      transformed = flip Control.Monad.mapM unfolded $ \ctx -> do ctype <- dsWithProb probDataSource
+      transformed = flip Control.Monad.mapM unfolded $ \ctx -> do ctype <- ctWithProb probsCT
                                                                   return $ addCodeContext ctype ctx
 
 makeGraphRooted ::  a -> Gr a () -> Gr a ()
@@ -223,14 +228,14 @@ joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (nodesg ++ nodesh
 
 
 
-genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> Double -> [Int] -> m CodeGraph
-genRandomCodeGraph probMap dataSourceProb edgesPerLevel = 
+genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
+genRandomCodeGraph probMap cTypeProb edgesPerLevel = 
   let
       levelGraphList = zipWith trivialLevelGraph [1..] edgesPerLevel
       levelGraph' = Control.Monad.foldM (joinLevelGraphRandom probMap) (trivialLevelGraph 0 0) levelGraphList
       levelGraph = Control.Monad.liftM2 makeGraphRooted (liftM (pred . minLevel) levelGraph') levelGraph'
   in 
-    levelGraph >>= (makeRandomCodeGraph dataSourceProb)
+    levelGraph >>= (makeRandomCodeGraph cTypeProb)
 
 ------------------------------------------------------------
 -- Lisp Backend
@@ -241,9 +246,12 @@ nodeToUniqueName =  (++) "functionCallNo" . show
 
 cgNodeToLispFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
-    "(datasource \"foo\" 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+    "(fetch \"foo\" 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
     "(somethingelse 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
+    "(write 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+
 
 cgNodeToLispLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToLispLetDef graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ (cgNodeToLispFunction (Graph.suc graph $ fst x) x))
@@ -289,7 +297,7 @@ randomExample :: MonadRandom m => m LevelGraph
 randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivialLevelGraph 2 3) 
 
 randomCodeGraphExample :: MonadRandom m => m CodeGraph
-randomCodeGraphExample = genRandomCodeGraph exampleMap 0.6 [2,2,3]
+randomCodeGraphExample = genRandomCodeGraph exampleMap [0.4,0.1] [2,2,3]
 
 
 
