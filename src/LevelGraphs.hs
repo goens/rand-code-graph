@@ -50,7 +50,7 @@ type Level = Int
 
 newtype CodeGraphNodeLabel = CodeGraphNodeLabel (Level,ComputationType) deriving (Show,Eq)
 
-type LevelGraph = Gr Level () -- There can only be edges (a,b) if level a < level b
+type LevelGraph = Data.Graph.Inductive.Gr Level () -- There can only be edges (a,b) if level a < level b
 type CodeGraph = Gr CodeGraphNodeLabel ()
 
 
@@ -201,24 +201,29 @@ trivialLevelGraph level n = Graph.buildGr $ List.map (\x -> ([],x,level,[])) [1.
 ------------------------------------------------------------
 
 joinGraph :: Gr a () -> Gr a () -> Gr a ()
-joinGraph g h = Graph.mkGraph (nodesg ++ nodeshmoved) (edgesg ++ edgesprod ++ edgeshmoved)
-    where nodesg = Graph.labNodes g
-          hmoved = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
-          nodeshmoved = Graph.labNodes hmoved
-          edgesg = Graph.labEdges g
-          edgeshmoved = Graph.labEdges hmoved
-          edgesprod = List.nub [ (a,b,()) | (a,_) <-nodesg, (b,_) <- nodeshmoved ]
+joinGraph g h = Graph.mkGraph (gNodes ++ hNodes') 
+                (gEdges ++ prodEdges ++ hEdges')
+  where gNodes = Graph.labNodes g
+        h' = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
+        hNodes' = Graph.labNodes h'
+        gEdges = Graph.labEdges g
+        hEdges' = Graph.labEdges h'
+        prodEdges = List.nub $ 
+                    [ (a,b,()) | (a,_) <-gNodes,
+                      (b,_) <- hNodes' ]
+                    ++ [ (a,b,()) | (a,_) <-hNodes',
+                         (b,_) <- gNodes]
 
 joinLevelGraph :: LevelGraph -> LevelGraph -> LevelGraph
-joinLevelGraph g h = Graph.mkGraph (nodesg ++ nodeshmoved) (edgesg ++ edgesprod ++ edgeshmoved)
---joinLevelGraph g h = (edgesg , edgesprod , edgeshmoved)
-    where nodesg = Graph.labNodes g
-          hmoved = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
-          nodeshmoved = Graph.labNodes hmoved
-          edgesg = Graph.labEdges g
-          edgeshmoved = Graph.labEdges hmoved
-          edgesprod = List.nub $ [ (a,b,()) | (a,l1) <-nodesg, (b,l2) <- nodeshmoved, (l1<l2) ]
-                      ++ [ (a,b,()) | (a,l1) <-nodeshmoved, (b,l2) <- nodesg, (l1<l2) ]
+joinLevelGraph g h = Graph.mkGraph (gNodes ++ hNodes') (gEdges ++ prodEdges ++ hEdges')
+--joinLevelGraph g h = (gEdges , edgesprod , hEdges')
+    where gNodes = Graph.labNodes g
+          h' = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
+          hNodes' = Graph.labNodes h'
+          gEdges = Graph.labEdges g
+          hEdges' = Graph.labEdges h'
+          prodEdges = List.nub $ [ (a,b,()) | (a,l1) <-gNodes, (b,l2) <- hNodes', (l1<l2) ]
+                      ++ [ (a,b,()) | (a,l1) <-hNodes', (b,l2) <- gNodes, (l1<l2) ]
 
 
 
@@ -226,26 +231,31 @@ joinLevelGraph g h = Graph.mkGraph (nodesg ++ nodeshmoved) (edgesg ++ edgesprod 
 -- and in the connection of both, an edge appears with fixed probability p. The appearences
 -- of different edges are (pseudo) stochastically independent
 joinGraphRandom :: MonadRandom m => Double -> Gr a () -> Gr a () -> m (Gr a ())
-joinGraphRandom p g h = (liftM2 Graph.mkGraph) (return (nodesg ++ nodeshmoved)) ((return edgesg) `rconcat` randedgesprod `rconcat` (return edgeshmoved) )
-    where nodesg = Graph.labNodes g 
-          hmoved = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
-          nodeshmoved = Graph.labNodes hmoved
-          edgesg = Graph.labEdges g
-          edgeshmoved = Graph.labEdges hmoved
-          randedgesprod = elemWithProb p $ List.nub [ (a,b,()) | (a,_) <-nodesg, (b,_) <- nodeshmoved]
+joinGraphRandom p g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes')) ((return gEdges) `rconcat` prodEdgesRand `rconcat` (return hEdges') )
+    where gNodes = Graph.labNodes g 
+          h' = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
+          hNodes' = Graph.labNodes h'
+          gEdges = Graph.labEdges g
+          hEdges' = Graph.labEdges h'
+          prodEdgesRand = elemWithProb p $ List.nub [ (a,b,()) | (a,_) <-gNodes, (b,_) <- hNodes']
 
 -- Like joinGraphRandom, but an edge (v,w) can only appear if level v < level w
 -- It takes a map to get different probabilities for different level combinations
 joinLevelGraphRandom :: MonadRandom m => Map.Map (Int,Int) Double -> LevelGraph -> LevelGraph -> m LevelGraph
-joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (nodesg ++ nodeshmoved)) ((return edgesg) `rconcat` randedgesprod `rconcat` (return edgeshmoved) )
-    where nodesg = Graph.labNodes g 
-          hmoved = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
-          nodeshmoved = Graph.labNodes hmoved
-          edgesg = Graph.labEdges g
-          edgeshmoved = Graph.labEdges hmoved
-          newedgeswithps = List.nub $ [ ((a,b,()), (pmap Map.! (l1,l2)) ) | (a,l1) <-nodesg, (b,l2) <- nodeshmoved, l1<l2]
-                           ++ [ ((a,b,()), (pmap Map.! (l1,l2)) ) | (a,l1) <-nodeshmoved, (b,l2) <- nodesg, l1<l2]
-          randedgesprod = elemWithProbMap newedgeswithps 
+joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes')) ((return gEdges) `rconcat` prodEdgesRand `rconcat` (return hEdges') )
+    where gNodes = Graph.labNodes g 
+          h' = intMap (+ (snd $ Graph.nodeRange g) ) h -- move nodes from g to start at 1 + (maxnode h)
+          hNodes' = Graph.labNodes h'
+          gEdges = Graph.labEdges g
+          hEdges' = Graph.labEdges h'
+          prodEdgesProb = List.nub $
+                          [((a,b,()), (pmap Map.! (l1,l2)))
+                           | (a,l1) <-gNodes, 
+                           (b,l2) <- hNodes', l1<l2] ++
+                          [((a,b,()), (pmap Map.! (l1,l2)))
+                           | (a,l1) <-hNodes',
+                           (b,l2) <- gNodes, l1<l2]
+          prodEdgesRand = elemWithProbMap prodEdgesProb
 
 
 
