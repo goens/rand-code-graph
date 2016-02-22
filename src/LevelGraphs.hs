@@ -33,7 +33,7 @@
 module LevelGraphs where
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
-import           Control.Monad.Random (MonadRandom,fromList, evalRandIO)
+import           Control.Monad.Random (MonadRandom,fromList, evalRandIO, getRandomR)
 
 import qualified System.Random        (mkStdGen, setStdGen)
 
@@ -43,7 +43,10 @@ import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple 
 
-data ComputationType = DataSource | SideEffect | OtherComputation deriving (Show, Eq)
+data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
+
+data ComputationType = DataSource | SideEffect | OtherComputation | 
+                       Conditional CondBranch CondBranch CondBranch deriving (Show, Eq) --conditional: condition true-branch false-branch
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
 type Level = Int
@@ -113,8 +116,23 @@ setSeed = System.Random.setStdGen . System.Random.mkStdGen
 rconcat :: MonadRandom m => m [a] -> m [a] -> m [a]
 rconcat = liftM2 (++)
 
-rguard ::MonadRandom m => MonadPlus n => m Bool -> m (n ())
+rguard ::(MonadRandom m, MonadPlus n) => m Bool -> m (n ())
 rguard = (liftM guard)
+
+
+--the following 4 functions adapted from http://www.rosettacode.org/wiki/Knuth_shuffle#Haskell
+mkRandListKnuth :: MonadRandom m => Int -> m [Int]
+mkRandListKnuth =  mapM (getRandomR . (,) 0) . enumFromTo 1 . pred
+
+replaceAt :: Int -> a -> [a] -> [a]
+replaceAt i c l = let (a,b) = splitAt i l in a++c:(drop 1 b)
+ 
+transposition :: (Int, Int) -> [a] -> [a]
+transposition (i,j) list | i==j = list
+                         | otherwise = replaceAt j (list!!i) $ replaceAt i (list!!j) list
+knuthShuffle :: MonadRandom m => [a] -> m [a]
+knuthShuffle xs =
+  liftM (foldr transposition xs. zip [1..]) (mkRandListKnuth (length xs))
 
 trueWithProb :: MonadRandom m => Double -> m Bool
 trueWithProb p = let p' = toRational p in Control.Monad.Random.fromList [ (True, p'), (False, (1 - p')) ]
@@ -128,6 +146,17 @@ ctWithProb ps =
         ps' = map toRational ps 
     in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation] (ps' ++ [1 - (sum ps')]) 
 
+condWithProb :: MonadRandom m => Double -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
+condWithProb p oldctx@(pre,node,CodeGraphNodeLabel (lvl,_),children) = 
+    if (length children > 3 || length children < 3) then return oldctx -- until we figure out a better way
+    else newctx >>= (\x -> return [(x,p'), (oldctx,1-p') ]) >>= Control.Monad.Random.fromList 
+         where p' = toRational p
+               randomBranches :: MonadRandom m => m [Maybe Graph.Node]
+               randomBranches = knuthShuffle $ take 3 $ (map Just $ map snd children) ++ [Nothing,Nothing,Nothing]
+               randomConditional = liftM mkConditional $ randomBranches
+               newctx = liftM  (\x -> (pre,node,CodeGraphNodeLabel (lvl, x),children)) randomConditional
+
+
 emptyWithProb :: MonadRandom m => Double -> [a] -> m [a]
 emptyWithProb p list = let p' = toRational p in Control.Monad.Random.fromList [ (list, p'), ([], (1 - p')) ]
 
@@ -136,16 +165,19 @@ elemWithProb :: MonadRandom m => Double -> [a] -> m [a]
 elemWithProb _ [] = return []
 elemWithProb p (e:es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProb p es)
 
-elemWithProbMap :: MonadRandom m => [(a,Double)] -> m [a] 
-elemWithProbMap [] = return []
-elemWithProbMap ((e,p):es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProbMap es)
-
+elemWithProbList :: MonadRandom m => [(a,Double)] -> m [a] 
+elemWithProbList [] = return []
+elemWithProbList ((e,p):es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProbList es)
 
 
 ------------------------------------------------------------
 -- Conversion Functions
 ------------------------------------------------------------
-
+mkConditional :: [Maybe Graph.Node] -> ComputationType
+mkConditional (cond:true:false:_) = Conditional (mkCNode cond) (mkCNode true) (mkCNode false)
+    where mkCNode Nothing = CondNil
+          mkCNode (Just n) = CondBranch n
+mkConditional incompleteList = mkConditional (incompleteList ++ [Nothing])
 
 addLevelContext :: Level -> Graph.Context () b -> Graph.Context Level b
 addLevelContext level (pre,node,(),after) = (pre,node,level,after)
@@ -170,6 +202,14 @@ makeRandomCodeGraph probsCT gr = liftM Graph.buildGr transformed
       unfolded = Graph.ufold (:) [] gr
       transformed = flip Control.Monad.mapM unfolded $ \ctx -> do ctype <- ctWithProb probsCT
                                                                   return $ addCodeContext ctype ctx
+
+makeCondCGWithProb :: MonadRandom m => Double -> CodeGraph -> m CodeGraph
+makeCondCGWithProb p gr = 
+  liftM Graph.buildGr transformed
+    where
+      unfolded = Graph.ufold (:) [] gr
+      transformed = flip Control.Monad.mapM unfolded $ condWithProb p 
+      
 
 makeGraphRooted ::  a -> Gr a () -> Gr a ()
 makeGraphRooted rootlabel graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootlabel)]) (oldEdges ++ newEdges) --the problem is that unocupied has no label!
@@ -255,7 +295,7 @@ joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes
                           [((a,b,()), (pmap Map.! (l1,l2)))
                            | (a,l1) <-hNodes',
                            (b,l2) <- gNodes, l1<l2]
-          prodEdgesRand = elemWithProbMap prodEdgesProb
+          prodEdgesRand = elemWithProbList prodEdgesProb
 
 
 
@@ -274,15 +314,19 @@ genRandomCodeGraph probMap cTypeProb edgesPerLevel =
 ------------------------------------------------------------
 
 nodeToUniqueName :: Graph.Node -> String
-nodeToUniqueName =  (++) "functionCallNo" . show
+nodeToUniqueName  =  (++) "local-" . show 
 
 cgNodeToLispFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
     "(fetch \"foo\" 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(somethingelse 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+    "(compute 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+    "(store 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+cgNodeToLispFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+    "(if " ++ List.intercalate " " (map maybeNodeToUniqueName [cond,trueBranch,falseBranch] ) ++ ")"
+           where maybeNodeToUniqueName CondNil = "nil"
+                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
 
 
 cgNodeToLispLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
@@ -310,6 +354,8 @@ concatenateTests randomGraphs = singleString
       randomGraphsNumbered = zip [1..] randomGraphs
       strings = map (\(x,y) -> toLispCodeWrapped ("run-test" ++ show x) y) randomGraphsNumbered
       singleString = List.intercalate "\n" strings
+
+
 
 ------------------------------------------------------------
 -- Examples
@@ -383,3 +429,9 @@ main = do
 --     which take statistics and not fixed numbers.
 --   - Think about the probabilities for the full graphs which are implied by
 --     the way the probabilities are currently done
+
+-- Idea to make the conditionals:
+-- for <= 3 children: fill up with nils. what about haskell?
+-- for > 3 children: group up. But how is most 'realistic'? I'm basically adding a level by grouping up...
+
+
