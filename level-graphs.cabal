@@ -60,6 +60,7 @@ library
                        MonadRandom,
                        random,
                        fgl,
+                       cmdargs,
                        containers
 
   
