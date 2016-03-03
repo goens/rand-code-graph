@@ -318,24 +318,24 @@ genRandomCodeGraph probMap cTypeProb edgesPerLevel =
 -- Lisp Backend
 ------------------------------------------------------------
 
-nodeToUniqueName :: Graph.Node -> String
-nodeToUniqueName  =  (++) "local-" . show 
+nodeToUniqueNameLisp :: Graph.Node -> String
+nodeToUniqueNameLisp  =  (++) "local-" . show 
 
 cgNodeToLispFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data \"service-name\" 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+    "(get-data \"service-name\" 1000 " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ ")"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+    "(compute 1000 " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ ")"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data 1000 " ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
+    "(write-data 1000 " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ ")"
 cgNodeToLispFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
     "(if " ++ List.intercalate " " (map maybeNodeToUniqueName [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToUniqueName CondNil = "nil"
-                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameLisp node
 
 
 cgNodeToLispLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToLispLetDef graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ (cgNodeToLispFunction (Graph.suc graph $ fst x) x))
+cgNodeToLispLetDef graph = (\x -> (nodeToUniqueNameLisp $ fst x) ++ " " ++ (cgNodeToLispFunction (Graph.suc graph $ fst x) x))
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -353,19 +353,53 @@ toLispCode graph = helperToLispCode nodes ++ "\n"
 toLispCodeWrapped :: String -> CodeGraph -> String
 toLispCodeWrapped testname graph = "(defn " ++ testname ++ " []\n" ++ toLispCode graph ++ ")" 
 
-concatenateTests ::  (String -> CodeGraph -> String) -> [ CodeGraph ] -> String
-concatenateTests toCodeWrapped randomGraphs = singleString
-    where
-      randomGraphsNumbered = zip [1..] randomGraphs
-      strings = map (\(x,y) -> toCodeWrapped ("run-test" ++ show x) y) randomGraphsNumbered
-      singleString = List.intercalate "\n" strings
-
 ------------------------------------------------------------
 -- Haskell Backend
 ------------------------------------------------------------
 
+nodeToUniqueNameHaskell :: Graph.Node -> String
+nodeToUniqueNameHaskell  =  (++) "local" . show 
+
+helperNodeToHaskellFunction :: [Graph.Node] -> String
+helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map nodeToUniqueNameHaskell children) ++ "]"
+    where listStart = if null children then "" else ", "
+
+cgNodeToHaskellFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToHaskellFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
+    "getData \"service-name\" [1000" ++ helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "compute [1000" ++  helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
+    "writeData \"service-name\" [1000" ++  helperNodeToHaskellFunction children
+cgNodeToHaskellFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+    "if " ++ (maybeNodeToUniqueName cond) ++ " then " ++ (maybeNodeToUniqueName trueBranch) ++ " else " ++  (maybeNodeToUniqueName falseBranch)
+           where maybeNodeToUniqueName CondNil = "nil"
+                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameHaskell node
+                 
+
+cgNodeToHaskellDoBind:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToHaskellDoBind graph = (\x -> (nodeToUniqueNameHaskell $ fst x) ++ " <- " ++ (cgNodeToHaskellFunction (Graph.suc graph $ fst x) x))
+
+-- assumes the level graph is connected!
+-- assumes the lowest level has exactly one element!
+-- (otherwise there is no call in the end)
+
+toHaskellCode :: CodeGraph -> String
+toHaskellCode graph = helperToHaskellCode nodes ++ "\n"
+    where 
+      nodes = reverse $ cGraphTopSort graph --bottom up
+      trSpace = "        "
+      helperToHaskellCode ns = concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns
+
 toHaskellCodeWrapped :: String -> CodeGraph -> String
-toHaskellCodeWrapped _ _ = "Haskell backend not implemented yet!"
+toHaskellCodeWrapped testname graph = testname ++ " :: IO Int\n" ++
+                                      testname ++ " =\n" ++
+                                      "    let\n" ++
+                                      "        stateStore = stateSet DataSourceState stateEmpty\n" ++
+                                      "    in do\n" ++
+                                      "    myEnv <- initEnv stateStore ()\n" ++
+                                      "    runHaxl myEnv $ do\n" ++
+                                      toHaskellCode graph ++ "\n"
 
 ------------------------------------------------------------
 -- Graph Backend
@@ -407,6 +441,12 @@ someExampleStringsVarLength = liftM (concatenateTests toLispCodeWrapped) $ seque
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
+concatenateTests ::  (String -> CodeGraph -> String) -> [ CodeGraph ] -> String
+concatenateTests toCodeWrapped randomGraphs = singleString
+    where
+      randomGraphsNumbered = zip [1..] randomGraphs
+      strings = map (\(x,y) -> toCodeWrapped ("run-test" ++ show x) y) randomGraphsNumbered
+      singleString = List.intercalate "\n" strings
 
 exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
