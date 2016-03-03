@@ -1,6 +1,5 @@
 {-# LANGUAGE ViewPatterns  #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 
 -- | Code for generating random level-graphs, a sort of generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
@@ -327,11 +326,11 @@ nodeToUniqueNameLisp  =  (++) "local-" . show
 
 cgNodeToLispFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data \"service-name\" 1000 " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ ")"
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ " \"service-name\" 1000)"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute 1000 " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ ")"
+    "(compute " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ " 1000)"
 cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data 1000 " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ ")"
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ " \"service-name\" 1000)"
 cgNodeToLispFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
     "(if " ++ List.intercalate " " (map maybeNodeToUniqueName [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToUniqueName CondNil = "nil"
