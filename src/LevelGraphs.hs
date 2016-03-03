@@ -32,10 +32,14 @@
 --   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
-module LevelGraphs where
+module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toLispCodeWrapped,
+                    toGraphCodeWrapped, genRandomCodeGraph, setSeed,
+                    joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
+                    graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
+                    nullGraph, nullLevelGraph, makeCondCGWithProb) where
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
-import           Control.Monad.Random (MonadRandom,fromList, evalRandIO, getRandomR)
+import           Control.Monad.Random (MonadRandom,fromList, getRandomR)
 
 import qualified System.Random        (mkStdGen, setStdGen)
 
@@ -45,7 +49,7 @@ import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple 
 --import           Data.Typeable()
-import           System.Console.CmdArgs
+
 
 
 data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
@@ -235,11 +239,11 @@ fullGraph :: Int -> Gr () ()
 fullGraph n = Graph.mkUGraph vs (concat $ map (\x -> [(x,a) | a <- [(x+1)..n] ] ++  [(a,x) | a <- [(x+1)..n] ] ) vs)
     where vs = [1..n]
 
-trivialGraph :: Int -> Gr () ()
-trivialGraph n = Graph.mkUGraph [1..n] []
+nullGraph :: Int -> Gr () ()
+nullGraph n = Graph.mkUGraph [1..n] []
 
-trivialLevelGraph :: Level -> Int -> LevelGraph
-trivialLevelGraph level n = Graph.buildGr $ List.map (\x -> ([],x,level,[])) [1..n]
+nullLevelGraph :: Level -> Int -> LevelGraph
+nullLevelGraph level n = Graph.buildGr $ List.map (\x -> ([],x,level,[])) [1..n]
 
 ------------------------------------------------------------
 -- Graph generating functions from graphs
@@ -308,8 +312,8 @@ joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes
 genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
 genRandomCodeGraph probMap cTypeProb edgesPerLevel = 
   let
-      levelGraphList = zipWith trivialLevelGraph [1..] edgesPerLevel
-      levelGraph' = Control.Monad.foldM (joinLevelGraphRandom probMap) (trivialLevelGraph 0 0) levelGraphList
+      levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
+      levelGraph' = Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
       levelGraph = Control.Monad.liftM2 makeGraphRooted (liftM (pred . minLevel) levelGraph') levelGraph'
   in 
     levelGraph >>= (makeRandomCodeGraph cTypeProb)
@@ -416,14 +420,14 @@ manualExample :: LevelGraph
 manualExample = Graph.mkGraph [(1,1),(2,1),(3,2),(4,2),(5,2)] [(1,3,()),(1,4,()),(1,5,()),(2,3,()),(2,4,()),(2,5,())]
 
 someExample :: CodeGraph
-someExample = makeCodeGraph DataSource $ joinLevelGraph (trivialLevelGraph 2 2) (trivialLevelGraph 3 2) 
+someExample = makeCodeGraph DataSource $ joinLevelGraph (nullLevelGraph 2 2) (nullLevelGraph 3 2) 
 
 exampleMap :: Map.Map (Int,Int) Double
 --exampleMap = Map.fromList [ ((1,2),0.5), ((1,3),0.2), ((1,4),0.05) ]
 exampleMap = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..50], b<-[1..50], a<b]
 
 randomExample :: MonadRandom m => m LevelGraph
-randomExample = joinLevelGraphRandom exampleMap (trivialLevelGraph 1 2) (trivialLevelGraph 2 3) 
+randomExample = joinLevelGraphRandom exampleMap (nullLevelGraph 1 2) (nullLevelGraph 2 3) 
 
 randomCodeGraphExample :: MonadRandom m => m CodeGraph
 randomCodeGraphExample = genRandomCodeGraph exampleMap [0.4,0.1] [2,2,3]
@@ -437,7 +441,6 @@ someExampleStrings = liftM (concatenateTests toLispCodeWrapped ) $ sequence (Lis
 someExampleStringsVarLength :: MonadRandom m => m String
 someExampleStringsVarLength = liftM (concatenateTests toLispCodeWrapped) $ sequence (map randomCodeGraphExampleVarLength [1..20])
 
-
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -448,38 +451,7 @@ concatenateTests toCodeWrapped randomGraphs = singleString
       strings = map (\(x,y) -> toCodeWrapped ("run-test" ++ show x) y) randomGraphsNumbered
       singleString = List.intercalate "\n" strings
 
-exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
-exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
 
-randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m CodeGraph
-randomExampleBenchmark weightMap typeWeights ifPercentage len = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraph weightMap typeWeights >>= makeCondCGWithProb ifPercentage
-
-
-genExampleBenchmark :: MonadRandom m => LGCmdArgs -> m String
-genExampleBenchmark lgArgs = let 
-
-    -- Options (arguments)
-    lvls = levels lgArgs
-    total = totalGraphs lgArgs
-    lang = language lgArgs
-    srcPercentage = percentageSources lgArgs
-    sinkPercentage = percentageSinks lgArgs
-    ifPercentage = percentageIfs lgArgs
-
-    -- Derivated data structures
-    lvllist = take total $ foldl (\x _ -> x ++  [1..lvls]) [] [1..total]
-    weightMap = exampleMapUpTo lvls
-    typeWeights = [srcPercentage,sinkPercentage]
-    toCodeWrapped = case () of
-                      () | lang == "Haskell" -> toHaskellCodeWrapped
-                         | lang == "Lisp" ->  toLispCodeWrapped
-                         | lang == "Graph" -> toGraphCodeWrapped
-                         | otherwise -> (\_ _ -> "Unexpected language case error")
-    in liftM (concatenateTests toCodeWrapped) $ sequence (map (randomExampleBenchmark weightMap typeWeights ifPercentage) lvllist)
-
-
---  graphs <- Control.Monad.Random.evalRandIO singleString
---  putStrLn graphs
 
 
 ------------------------------------------------------------
@@ -490,113 +462,6 @@ genExampleBenchmark lgArgs = let
 -- codeGraphNodetoLisp (a,b,(level,ctype)) = case ctype of DataSource -> "foo"
 --                                                         OtherComputation -> "bar"
 
-------------------------------------------------------------
--- Command-Line Arguments Parsing
-------------------------------------------------------------
-
-data LGCmdArgs = LGCmdArgs {output :: String,
-                        levels :: Int,
-                        totalGraphs :: Int,
-                        language :: String,
-                        seed :: Int,
-                        percentageSources :: Double,
-                        percentageSinks :: Double,
-                        percentageIfs :: Double 
-                       } deriving (Show, Data, Typeable)
-
-lgCmdArgs :: LGCmdArgs
-lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If nothing given it is output to stdout",
-                       levels = 10 &= name "l" &= help "Number of different levels to generate. Default is 10",
-                       totalGraphs = 20 &= name "n" &= help "Total number of graphs to generate. Default is 20",
-                       language = "Lisp" &= name "L" &= help "Language to outpt in. \"Graph\" for graphs. Default is Lisp.",
-                       seed = (-1) &= name "s" &= help "Random seed for ensuring reproducibility (positive integer). Default is random.",
-                       percentageSources = 0.4 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sinks, and executes (implicit). Default is 0.4",
-                       percentageSinks = 0 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
-                       percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0"
-                      }
-            &= summary "Level-graphs: generates random level graphs, v-0.1.0.0"
-                                 
-checkArgs :: LGCmdArgs -> IO Bool
-checkArgs args = do
-  error <- return False
-  outputFile <- return $ output args
-  -- here I would a check if I can write the file
-  let l = levels args
-  error <- if l < 0 then
-               do
-                 print "Error: Negative level!"
-                 return True
-           else 
-               do
-                 return error
-
-  let n = totalGraphs args
-  error <- if n < 0 then
-               do
-                 print "Error: Negative number of graphs!"
-                 return True
-           else 
-               do
-                 return error
-  let lang = language args
-  error <- if (lang == "Lisp" || lang == "Haskell" || lang == "Graph") then
-               do
-                 return error
-           else 
-               do
-                 print "Error: Unrecognized language! (maybe not capitalized?)"
-                 return True
-  let s = seed args
-  error <- if (s < 0 && s /= (-1)) then
-               do
-                 print "Error: Negative seed!"
-                 return True
-           else 
-               do
-                 return error
-  let ifPercentage = percentageIfs args
-      srcPercentage = percentageSources args
-      sinkPercentage = percentageSinks args
-      totalPrecentages = sinkPercentage + srcPercentage
-      conditionPercentages = (srcPercentage < 0) || (srcPercentage > 1) ||
-                             (sinkPercentage < 0) || (sinkPercentage > 1) ||
-                             (ifPercentage < 0) || (ifPercentage > 1) ||
-                             (totalPrecentages > 1)
-  error <- if (conditionPercentages) then
-               do
-                 print "Error: Percentages for node types must be between 0 and 1. Percentages for source and sink must add to <= 1 (the rest is implicitly the percentage for compute nodes)"
-                 return True
-           else 
-               do
-                 return error
-
-  
-  return error     
--- ----------------
---      main
--- ----------------
-main :: IO ()
-main = do 
-  args <- cmdArgs lgCmdArgs
-  error <- checkArgs args
-  if error == True then
-      return ()
-  else 
-      do
-        -- Main execution branch
-
-        -- Setup (seed, output file)
-        setSeed (seed args)
-        let outputFile = output args
-
-        -- Execute benchmark
-        outputString <- Control.Monad.Random.evalRandIO (genExampleBenchmark args)
-        
-        -- Print it accordingly
-        if outputFile == "" then
-            putStrLn outputString
-        else
-            writeFile outputFile outputString 
 
 --main = do
 --  str <- Control.Monad.Random.evalRandIO someExampleStringsVarLength
