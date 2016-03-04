@@ -63,8 +63,8 @@ genExampleBenchmark lgArgs = let
     ifPercentage = percentageIfs lgArgs
 
     -- Derivated data structures
-    lvllist = take total $ foldl (\x _ -> x ++  lvls) [] [1..total]
-    weightMap = exampleMapUpTo $ maximum lvls
+    lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..1]) [] [1..total]
+    weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage]
     toCodeWrapped = case lang of
                       "Haskell" -> toHaskellCodeWrapped
@@ -83,7 +83,7 @@ genExampleBenchmark lgArgs = let
 ------------------------------------------------------------
 
 data LGCmdArgs = LGCmdArgs {output :: String,
-                            levels :: [Int],
+                            levels :: Int,
                             totalGraphs :: Int,
                             language :: String,
                             seed :: Int,
@@ -94,7 +94,7 @@ data LGCmdArgs = LGCmdArgs {output :: String,
 
 lgCmdArgs :: LGCmdArgs
 lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no output file nor a namespace is given, only the graph code is output to stdout.",
-                       levels = [1..10] &= name "l" &= help "When several graphs are generated, a list of the total number of levels to be generated. They will be repeated once the list is finished, if there are more graphs than levels. Default is [1..10], which means [1,2,3,4,5,6,7,8,9,10].",
+                       levels = 10 &= name "l" &= help "When several graphs are generated, this gives the maximum number of levels the graphs will have. Will generate graphs having l levels, l-1 levels, and so forth until 1. They will be repeated once the list is finished, if there are more graphs than levels. Default is 10",
                        totalGraphs = 1 &= name "n" &= help "Total number of graphs to generate. Default is 1",
                        language = "Ohua" &= name "L" &= help "Language to outpt in. \"Graph\" for graphs. Default is Ohua.",
                        seed = (-1) &= name "s" &= help "Random seed for ensuring reproducibility (positive integer). Default is random.",
@@ -108,9 +108,9 @@ checkArgs :: LGCmdArgs -> IO Bool
 checkArgs lgArgs = do
   errorOcurred <- return False
   let l = levels lgArgs
-  errorOcurred <- if minimum l < 0 then
+  errorOcurred <- if l < 0 then
                do
-                 print "Error: Negative level(s)!"
+                 print "Error: Negative level!"
                  return True
            else 
                do
@@ -188,5 +188,4 @@ main = do
             putStrLn outputString
         else
             writeFile outputFile outputString 
-    
   return ()
