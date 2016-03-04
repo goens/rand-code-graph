@@ -31,7 +31,7 @@
 --   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
-module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toLispCodeWrapped,
+module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
                     toGraphCodeWrapped, genRandomCodeGraph, setSeed,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
@@ -322,43 +322,43 @@ genRandomCodeGraph probMap cTypeProb edgesPerLevel =
     levelGraph >>= (makeRandomCodeGraph cTypeProb)
 
 ------------------------------------------------------------
--- Lisp Backend
+-- Ohua Backend
 ------------------------------------------------------------
 
-nodeToUniqueNameLisp :: Graph.Node -> String
-nodeToUniqueNameLisp  =  (++) "local-" . show 
+nodeToUniqueNameOhua :: Graph.Node -> String
+nodeToUniqueNameOhua  =  (++) "local-" . show 
 
-cgNodeToLispFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ " \"service-name\" 1000)"
-cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ " 1000)"
-cgNodeToLispFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameLisp children) ++ " \"service-name\" 1000)"
-cgNodeToLispFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+cgNodeToOhuaFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToOhuaFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" 1000)"
+cgNodeToOhuaFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "(compute " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " 1000)"
+cgNodeToOhuaFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" 1000)"
+cgNodeToOhuaFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
     "(if " ++ List.intercalate " " (map maybeNodeToUniqueName [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToUniqueName CondNil = "nil"
-                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameLisp node
+                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameOhua node
 
 
-cgNodeToLispLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToLispLetDef graph = (\x -> (nodeToUniqueNameLisp $ fst x) ++ " " ++ (cgNodeToLispFunction (Graph.suc graph $ fst x) x))
+cgNodeToOhuaLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToOhuaLetDef graph = (\x -> (nodeToUniqueNameOhua $ fst x) ++ " " ++ (cgNodeToOhuaFunction (Graph.suc graph $ fst x) x))
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
 -- (otherwise there is no call in the end)
 
-toLispCode :: CodeGraph -> String
-toLispCode graph = helperToLispCode nodes ++ "\n"
+toOhuaCode :: CodeGraph -> String
+toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToLisp levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToLispLetDef graph) levelNodes) ++ "]"
-      helperToLispCode [] = ""
-      helperToLispCode [[lastLvlNode]] = cgNodeToLispFunction (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
-      helperToLispCode (lvl:lvls) = "(" ++ (levelToLisp lvl) ++ "\n" ++ (helperToLispCode lvls) ++ ")"
+      levelToOhua levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToOhuaLetDef graph) levelNodes) ++ "]"
+      helperToOhuaCode [] = ""
+      helperToOhuaCode [[lastLvlNode]] = cgNodeToOhuaFunction (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToOhuaCode (lvl:lvls) = "(" ++ (levelToOhua lvl) ++ "\n" ++ (helperToOhuaCode lvls) ++ ")"
 
-toLispCodeWrapped :: String -> CodeGraph -> String
-toLispCodeWrapped testname graph = "(defn " ++ testname ++ " []\n" ++ toLispCode graph ++ ")" 
+toOhuaCodeWrapped :: String -> CodeGraph -> String
+toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n" ++ toOhuaCode graph ++ ")" 
 
 ------------------------------------------------------------
 -- Haskell Backend
@@ -439,10 +439,10 @@ randomCodeGraphExampleVarLength :: MonadRandom m => Int -> m CodeGraph
 randomCodeGraphExampleVarLength n = (sequence $ replicate n (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraph exampleMap [0.4,0.1]
 
 someExampleStrings :: MonadRandom m => m String
-someExampleStrings = liftM (concatenateTests toLispCodeWrapped ) $ sequence (List.replicate 10 randomCodeGraphExample)
+someExampleStrings = liftM (concatenateTests toOhuaCodeWrapped ) $ sequence (List.replicate 10 randomCodeGraphExample)
 
 someExampleStringsVarLength :: MonadRandom m => m String
-someExampleStringsVarLength = liftM (concatenateTests toLispCodeWrapped) $ sequence (map randomCodeGraphExampleVarLength [1..20])
+someExampleStringsVarLength = liftM (concatenateTests toOhuaCodeWrapped) $ sequence (map randomCodeGraphExampleVarLength [1..20])
 
 ------------------------------------------------------------
 -- Benchmark Code
@@ -461,8 +461,8 @@ concatenateTests toCodeWrapped randomGraphs = singleString
 -- Test Area
 ------------------------------------------------------------
 
--- codeGraphNodetoLisp :: Graph.LNode (Level,ComputationType) -> String
--- codeGraphNodetoLisp (a,b,(level,ctype)) = case ctype of DataSource -> "foo"
+-- codeGraphNodetoOhua :: Graph.LNode (Level,ComputationType) -> String
+-- codeGraphNodetoOhua (a,b,(level,ctype)) = case ctype of DataSource -> "foo"
 --                                                         OtherComputation -> "bar"
 
 
@@ -478,7 +478,7 @@ concatenateTests toCodeWrapped randomGraphs = singleString
 --   - Make Graphs with DataSinks (like sources)
 -- 
 -- Code Generation:
---   - Make a Haskell (Haxl) example out of the Lisp example
+--   - Make a Haskell (Haxl) example out of the Ohua example
 --   - Adapt backend based on example for generating Haskell (Haxl) code 
 --
 -- Random statistics:

@@ -32,7 +32,7 @@
 --   andres.goens@tu-dresden.de
 
 
-import           LevelGraphs (CodeGraph, toHaskellCodeWrapped, toLispCodeWrapped,
+import           LevelGraphs (CodeGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
                               toGraphCodeWrapped, makeCondCGWithProb, 
                               concatenateTests, genRandomCodeGraph, setSeed)
 import           Control.Monad.Random (evalRandIO)
@@ -63,14 +63,14 @@ genExampleBenchmark lgArgs = let
     ifPercentage = percentageIfs lgArgs
 
     -- Derivated data structures
-    lvllist = take total $ foldl (\x _ -> x ++  [1..lvls]) [] [1..total]
-    weightMap = exampleMapUpTo lvls
+    lvllist = take total $ foldl (\x _ -> x ++  lvls) [] [1..total]
+    weightMap = exampleMapUpTo $ maximum lvls
     typeWeights = [srcPercentage,sinkPercentage]
-    toCodeWrapped = case () of
-                      () | lang == "Haskell" -> toHaskellCodeWrapped
-                         | lang == "Lisp" ->  toLispCodeWrapped
-                         | lang == "Graph" -> toGraphCodeWrapped
-                         | otherwise -> (\_ _ -> "Unexpected language case error")
+    toCodeWrapped = case lang of
+                      "Haskell" -> toHaskellCodeWrapped
+                      "Ohua" ->  toOhuaCodeWrapped
+                      "Graph" -> toGraphCodeWrapped
+                      _ -> (\_ _ -> "Unexpected language case error")
     in liftM (concatenateTests toCodeWrapped) $ sequence (map (randomExampleBenchmark weightMap typeWeights ifPercentage) lvllist)
 
 
@@ -83,20 +83,20 @@ genExampleBenchmark lgArgs = let
 ------------------------------------------------------------
 
 data LGCmdArgs = LGCmdArgs {output :: String,
-                            levels :: Int,
+                            levels :: [Int],
                             totalGraphs :: Int,
                             language :: String,
                             seed :: Int,
                             percentageSources :: Double,
                             percentageSinks :: Double,
-                            percentageIfs :: Double 
+                            percentageIfs :: Double
                            } deriving (Show, Data, Typeable)
 
 lgCmdArgs :: LGCmdArgs
-lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If nothing given it is output to stdout",
-                       levels = 10 &= name "l" &= help "Number of different levels to generate. Default is 10",
-                       totalGraphs = 20 &= name "n" &= help "Total number of graphs to generate. Default is 20",
-                       language = "Lisp" &= name "L" &= help "Language to outpt in. \"Graph\" for graphs. Default is Lisp.",
+lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no output file nor a namespace is given, only the graph code is output to stdout.",
+                       levels = [1..10] &= name "l" &= help "When several graphs are generated, a list of the total number of levels to be generated. They will be repeated once the list is finished, if there are more graphs than levels. Default is [1..10], which means [1,2,3,4,5,6,7,8,9,10].",
+                       totalGraphs = 1 &= name "n" &= help "Total number of graphs to generate. Default is 1",
+                       language = "Ohua" &= name "L" &= help "Language to outpt in. \"Graph\" for graphs. Default is Ohua.",
                        seed = (-1) &= name "s" &= help "Random seed for ensuring reproducibility (positive integer). Default is random.",
                        percentageSources = 0.4 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sinks, and executes (implicit). Default is 0.4",
                        percentageSinks = 0 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
@@ -108,9 +108,9 @@ checkArgs :: LGCmdArgs -> IO Bool
 checkArgs lgArgs = do
   errorOcurred <- return False
   let l = levels lgArgs
-  errorOcurred <- if l < 0 then
+  errorOcurred <- if minimum l < 0 then
                do
-                 print "Error: Negative level!"
+                 print "Error: Negative level(s)!"
                  return True
            else 
                do
@@ -125,7 +125,7 @@ checkArgs lgArgs = do
                do
                  return errorOcurred
   let lang = language lgArgs
-  errorOcurred <- if (lang == "Lisp" || lang == "Haskell" || lang == "Graph") then
+  errorOcurred <- if (lang == "Ohua" || lang == "Haskell" || lang == "Graph") then
                do
                  return errorOcurred
            else 
@@ -155,9 +155,13 @@ checkArgs lgArgs = do
            else 
                do
                  return errorOcurred
-
-  
   return errorOcurred     
+
+------------------------------------------------------------
+-- Miscellaneous
+------------------------------------------------------------
+
+
 -- ----------------
 --      main
 -- ----------------
