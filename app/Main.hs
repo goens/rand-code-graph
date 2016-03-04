@@ -3,9 +3,9 @@
 
 -- | Code for generating random level-graphs, a sort of generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
---   This is part of a project for efficient IO batching using 
+--   This is part of a project for efficient IO batching using
 --   Ohua (https://bitbucket.org/sertel/ohua), and compare it with Muse and Haxl.
--- 
+--
 --
 --
 --         CCCCCCCCCCCCC        CCCCCCCCCCCCC        CCCCCCCCCCCCC
@@ -13,18 +13,18 @@
 --    CC:::::::::::::::C   CC:::::::::::::::C   CC:::::::::::::::C
 --   C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C
 --  C:::::C       CCCCCC C:::::C       CCCCCC C:::::C       CCCCCC
--- C:::::C              C:::::C              C:::::C              
--- C:::::C              C:::::C              C:::::C              
--- C:::::C              C:::::C              C:::::C              
--- C:::::C              C:::::C              C:::::C              
--- C:::::C              C:::::C              C:::::C              
--- C:::::C              C:::::C              C:::::C              
+-- C:::::C              C:::::C              C:::::C
+-- C:::::C              C:::::C              C:::::C
+-- C:::::C              C:::::C              C:::::C
+-- C:::::C              C:::::C              C:::::C
+-- C:::::C              C:::::C              C:::::C
+-- C:::::C              C:::::C              C:::::C
 --  C:::::C       CCCCCC C:::::C       CCCCCC C:::::C       CCCCCC
 --   C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C  C:::::CCCCCCCC::::C
 --    CC:::::::::::::::C   CC:::::::::::::::C   CC:::::::::::::::C
 --      CCC::::::::::::C     CCC::::::::::::C     CCC::::::::::::C
 --         CCCCCCCCCCCCC        CCCCCCCCCCCCC        CCCCCCCCCCCCC
---                                                              
+--
 --   ------------- Chair for Compiler Construction ---------------
 --   ---------------------- TU Dresden --------------------------
 --
@@ -43,7 +43,7 @@ import qualified Data.Map.Strict                                             as 
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
-   
+
 exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
 
@@ -52,7 +52,7 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len = (sequence $ repl
 
 
 genExampleBenchmark :: MonadRandom m => LGCmdArgs -> m String
-genExampleBenchmark lgArgs = let 
+genExampleBenchmark lgArgs = let
 
     -- Options (arguments)
     lvls = levels lgArgs
@@ -77,7 +77,7 @@ genExampleBenchmark lgArgs = let
 --  graphs <- Control.Monad.Random.evalRandIO singleString
 --  putStrLn graphs
 
-    
+
 ------------------------------------------------------------
 -- Command-Line Arguments Parsing
 ------------------------------------------------------------
@@ -89,7 +89,8 @@ data LGCmdArgs = LGCmdArgs {output :: String,
                             seed :: Int,
                             percentageSources :: Double,
                             percentageSinks :: Double,
-                            percentageIfs :: Double
+                            percentageIfs :: Double,
+                            preamble :: Maybe FilePath
                            } deriving (Show, Data, Typeable)
 
 lgCmdArgs :: LGCmdArgs
@@ -100,10 +101,11 @@ lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no ou
                        seed = (-1) &= name "s" &= help "Random seed for ensuring reproducibility (positive integer). Default is random.",
                        percentageSources = 0.4 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sinks, and executes (implicit). Default is 0.4",
                        percentageSinks = 0 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
-                       percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0"
+                       percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0",
+                       preamble = def &= name "p" &= help "Prepend some code to the generated code."
                       }
             &= summary "Level-graphs: generates random level graphs, v-0.1.0.0"
-                                 
+
 checkArgs :: LGCmdArgs -> IO Bool
 checkArgs lgArgs = do
   errorOcurred <- return False
@@ -112,7 +114,7 @@ checkArgs lgArgs = do
                do
                  print "Error: Negative level!"
                  return True
-           else 
+           else
                do
                  return errorOcurred
 
@@ -121,14 +123,14 @@ checkArgs lgArgs = do
                do
                  print "Error: Negative number of graphs!"
                  return True
-           else 
+           else
                do
                  return errorOcurred
   let lang = language lgArgs
   errorOcurred <- if (lang == "Ohua" || lang == "Haskell" || lang == "Graph") then
                do
                  return errorOcurred
-           else 
+           else
                do
                  print "Error: Unrecognized language! (maybe not capitalized?)"
                  return True
@@ -137,7 +139,7 @@ checkArgs lgArgs = do
                do
                  print "Error: Negative seed!"
                  return True
-           else 
+           else
                do
                  return errorOcurred
   let ifPercentage = percentageIfs lgArgs
@@ -152,27 +154,23 @@ checkArgs lgArgs = do
                do
                  print "Error: Percentages for node types must be between 0 and 1. Percentages for source and sink must add to <= 1 (the rest is implicitly the percentage for compute nodes)"
                  return True
-           else 
+           else
                do
                  return errorOcurred
-  return errorOcurred     
 
-------------------------------------------------------------
--- Miscellaneous
-------------------------------------------------------------
-
+  return errorOcurred
 
 -- ----------------
 --      main
 -- ----------------
 main :: IO ()
-main = do 
+main = do
   lgArgs <- cmdArgs lgCmdArgs
   errorOcurred <- checkArgs lgArgs
 
   if errorOcurred == True then
       return ()
-  else 
+  else
       do
         -- Main execution branch
 
@@ -182,10 +180,15 @@ main = do
 
         -- Execute benchmark
         outputString <- Control.Monad.Random.evalRandIO (genExampleBenchmark lgArgs)
-        
+
+        outputString <- case preamble lgArgs of
+                            Nothing -> return outputString
+                            Just file -> liftM (++ outputString) $ readFile file
+
         -- Print it accordingly
         if outputFile == "" then
             putStrLn outputString
         else
-            writeFile outputFile outputString 
+            writeFile outputFile outputString
+
   return ()
