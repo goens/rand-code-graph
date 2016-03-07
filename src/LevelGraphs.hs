@@ -35,6 +35,7 @@ module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toOhuaCodeWrapp
                     toGraphCodeWrapped, genRandomCodeGraph, setSeed,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
+                    levelsLGraph, levelsCGraph, genRandomCodeGraphBigDS,
                     nullGraph, nullLevelGraph, makeCondCGWithProb) where
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
@@ -54,7 +55,8 @@ import qualified Data.Tuple           as Tuple
 data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
 
 data ComputationType = DataSource | SideEffect | OtherComputation | 
-                       Conditional CondBranch CondBranch CondBranch deriving (Show, Eq) --conditional: condition true-branch false-branch
+                       Conditional CondBranch CondBranch CondBranch |
+                       SlowDataSource deriving (Show, Eq) --conditional: condition true-branch false-branch
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
 type Level = Int
@@ -113,6 +115,11 @@ cGraphLevelSort graph = [ subList l | l <- levels ]
     levels = List.nub $ map getLevelCGN topSort
     subList l = [ (node,CodeGraphNodeLabel (l',ctype)) |  (node,CodeGraphNodeLabel (l',ctype)) <- topSort, l'==l]
 
+levelsLGraph :: LevelGraph -> Int
+levelsLGraph  = length . List.nub . (map snd) . Graph.labNodes
+
+levelsCGraph :: CodeGraph -> Int
+levelsCGraph  = length . List.nub . (map getLevelCGN) . Graph.labNodes
 
 ------------------------------------------------------------
 -- Random-monad helper functions
@@ -220,7 +227,7 @@ makeCondCGWithProb p gr =
       
 
 makeGraphRooted ::  a -> Gr a () -> Gr a ()
-makeGraphRooted rootlabel graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootlabel)]) (oldEdges ++ newEdges) --the problem is that unocupied has no label!
+makeGraphRooted rootlabel graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootlabel)]) (oldEdges ++ newEdges) 
 --makeGraphRooted _ graph  = newEdges
     where
       unocupied = (+1) $ snd $ Graph.nodeRange graph
@@ -228,6 +235,20 @@ makeGraphRooted rootlabel graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootlab
       oldNodes = Graph.labNodes graph
       oldNodes' = map fst $ Graph.labNodes graph
       newEdges = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
+
+
+makeGraphUnbalancedBigTree ::  CodeGraph -> CodeGraph
+makeGraphUnbalancedBigTree graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootnodelabel)] ++ [bigsource]) (oldEdges ++ newEdges) 
+    where
+      unocupied = (+1) $ snd $ Graph.nodeRange graph
+      startlvl =  (pred . minLevelCG) graph
+      rootnodelabel = CodeGraphNodeLabel (startlvl,OtherComputation)
+      bigsource = (succ unocupied, CodeGraphNodeLabel (succ startlvl, SlowDataSource))
+      oldEdges = Graph.labEdges graph
+      oldNodes = Graph.labNodes graph
+      oldNodes' = map fst $ Graph.labNodes graph
+      newEdges' = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
+      newEdges = (unocupied,unocupied+1,()):newEdges'
 
 ------------------------------------------------------------
 -- Basic graph families
@@ -313,6 +334,7 @@ joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes
 
 
 genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
+genRandomCodeGraph _ cTypeProb [] = makeRandomCodeGraph cTypeProb (nullLevelGraph 1 1)
 genRandomCodeGraph probMap cTypeProb edgesPerLevel = 
   let
       levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
@@ -320,6 +342,16 @@ genRandomCodeGraph probMap cTypeProb edgesPerLevel =
       levelGraph = Control.Monad.liftM2 makeGraphRooted (liftM (pred . minLevel) levelGraph') levelGraph'
   in 
     levelGraph >>= (makeRandomCodeGraph cTypeProb)
+
+genRandomCodeGraphBigDS :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
+genRandomCodeGraphBigDS _ cTypeProb [] = makeRandomCodeGraph cTypeProb (nullLevelGraph 1 1)
+genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel = 
+  let
+      levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
+      levelGraph = Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
+      codeGraph' = levelGraph >>= (makeRandomCodeGraph cTypeProb) 
+  in liftM makeGraphUnbalancedBigTree codeGraph'
+
 
 ------------------------------------------------------------
 -- Ohua Backend
@@ -329,12 +361,14 @@ nodeToUniqueNameOhua :: Graph.Node -> String
 nodeToUniqueNameOhua  =  (++) "local-" . show 
 
 cgNodeToOhuaFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhuaFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" 1000)"
-cgNodeToOhuaFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " 1000)"
-cgNodeToOhuaFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" 1000)"
+cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,DataSource)) = 
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ show n  ++ ")"
+cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
+cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "(compute " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " " ++ show n ++ ")"
+cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,SideEffect)) = 
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ show n ++ ")"
 cgNodeToOhuaFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
     "(if " ++ List.intercalate " " (map maybeNodeToUniqueName [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToUniqueName CondNil = "nil"
@@ -372,12 +406,14 @@ helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map n
     where listStart = if null children then "" else ", "
 
 cgNodeToHaskellFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToHaskellFunction children (_,CodeGraphNodeLabel (_,DataSource)) = 
-    "getData \"service-name\" [1000" ++ helperNodeToHaskellFunction children
-cgNodeToHaskellFunction children (_,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "compute [1000" ++  helperNodeToHaskellFunction children
-cgNodeToHaskellFunction children (_,CodeGraphNodeLabel (_,SideEffect)) = 
-    "writeData \"service-name\" [1000" ++  helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,DataSource)) = 
+    "getData \"service-name\" [" ++ show n ++ helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
+    "slowGetData \"service-name\" [" ++ show (10000 + n) ++ helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "compute [" ++ show n ++  helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SideEffect)) = 
+    "writeData \"service-name\" [" ++ show n ++  helperNodeToHaskellFunction children
 cgNodeToHaskellFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
     "if " ++ (maybeNodeToUniqueName cond) ++ " then " ++ (maybeNodeToUniqueName trueBranch) ++ " else " ++  (maybeNodeToUniqueName falseBranch)
            where maybeNodeToUniqueName CondNil = "nil"
@@ -413,7 +449,7 @@ toHaskellCodeWrapped testname graph = testname ++ " :: IO Int\n" ++
 ------------------------------------------------------------
 
 toGraphCodeWrapped :: String -> CodeGraph -> String
-toGraphCodeWrapped _ _ = "Graph backend not implemented yet!"
+toGraphCodeWrapped name graph = "Graph-" ++ name ++ "\n" ++ Graph.prettify graph ++ "\n"
 
 ------------------------------------------------------------
 -- Simple Examples
@@ -450,8 +486,9 @@ someExampleStringsVarLength = liftM (concatenateTests toOhuaCodeWrapped) $ seque
 concatenateTests ::  (String -> CodeGraph -> String) -> [ CodeGraph ] -> String
 concatenateTests toCodeWrapped randomGraphs = singleString
     where
-      randomGraphsNumbered = zip [1..] randomGraphs
-      strings = map (\(x,y) -> toCodeWrapped ("run-test" ++ show x) y) randomGraphsNumbered
+      randomGraphsNumbered = zip [0..] randomGraphs
+      totallevels = maximum $ map levelsCGraph randomGraphs 
+      strings = map (\(x,y) -> toCodeWrapped ("run-test-level" ++ (show $ levelsCGraph y) ++ "-" ++ show (x `quot` totallevels)) y) randomGraphsNumbered
       singleString = List.intercalate "\n" strings
 
 

@@ -31,10 +31,11 @@
 --   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
-
+--import Debug.Trace (trace)
 import           LevelGraphs (CodeGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
                               toGraphCodeWrapped, makeCondCGWithProb, 
-                              concatenateTests, genRandomCodeGraph, setSeed)
+                              concatenateTests, genRandomCodeGraph,
+                              genRandomCodeGraphBigDS, setSeed)
 import           Control.Monad.Random (evalRandIO)
 import           System.Console.CmdArgs
 import           Control.Monad.Random (MonadRandom,fromList)
@@ -48,22 +49,29 @@ exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
 
 randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m CodeGraph
-randomExampleBenchmark weightMap typeWeights ifPercentage len = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraph weightMap typeWeights >>= makeCondCGWithProb ifPercentage
+--randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
+randomExampleBenchmark weightMap typeWeights ifPercentage len = let lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) 
+                                                                    --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
+                                                                    in lvllist >>= genRandomCodeGraph weightMap typeWeights >>= makeCondCGWithProb ifPercentage
+
+randomExampleBenchmarkBDS :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m CodeGraph
+randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraphBigDS weightMap typeWeights >>= makeCondCGWithProb ifPercentage
 
 
 genExampleBenchmark :: MonadRandom m => LGCmdArgs -> m String
 genExampleBenchmark lgArgs = let
 
     -- Options (arguments)
-    lvls = levels lgArgs
+    lvls = levels lgArgs - 1 
     total = totalGraphs lgArgs
     lang = language lgArgs
     srcPercentage = percentageSources lgArgs
     sinkPercentage = percentageSinks lgArgs
     ifPercentage = percentageIfs lgArgs
+    slowDS = slowdatasource lgArgs
 
     -- Derivated data structures
-    lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..1]) [] [1..total]
+    lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..0]) [] [1..total]
     weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage]
     toCodeWrapped = case lang of
@@ -71,7 +79,8 @@ genExampleBenchmark lgArgs = let
                       "Ohua" ->  toOhuaCodeWrapped
                       "Graph" -> toGraphCodeWrapped
                       _ -> (\_ _ -> "Unexpected language case error")
-    in liftM (concatenateTests toCodeWrapped) $ sequence (map (randomExampleBenchmark weightMap typeWeights ifPercentage) lvllist)
+    randomBenchmark = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
+    in liftM (concatenateTests toCodeWrapped) $ sequence (map (randomBenchmark weightMap typeWeights ifPercentage) lvllist)
 
 
 --  graphs <- Control.Monad.Random.evalRandIO singleString
@@ -90,6 +99,7 @@ data LGCmdArgs = LGCmdArgs {output :: String,
                             percentageSources :: Double,
                             percentageSinks :: Double,
                             percentageIfs :: Double,
+                            slowdatasource :: Bool,
                             preamble :: Maybe FilePath
                            } deriving (Show, Data, Typeable)
 
@@ -102,7 +112,8 @@ lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no ou
                        percentageSources = 0.4 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sinks, and executes (implicit). Default is 0.4",
                        percentageSinks = 0 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
                        percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0",
-                       preamble = def &= name "p" &= help "Prepend some code to the generated code."
+                       preamble = def &= name "p" &= help "Prepend some code to the generated code.",
+                       slowdatasource = False &= name "S" &= help "Include a slow data source at one side."
                       }
             &= summary "Level-graphs: generates random level graphs, v-0.1.0.0"
 
@@ -110,9 +121,9 @@ checkArgs :: LGCmdArgs -> IO Bool
 checkArgs lgArgs = do
   errorOcurred <- return False
   let l = levels lgArgs
-  errorOcurred <- if l < 0 then
+  errorOcurred <- if l <= 0 then
                do
-                 print "Error: Negative level!"
+                 print "Error: Non-positive level!"
                  return True
            else
                do
