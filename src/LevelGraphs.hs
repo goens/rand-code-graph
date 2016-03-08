@@ -437,7 +437,7 @@ toHaskellCode graph = helperToHaskellCode nodes ++ "\n"
 
 toHaskellCodeWrapped :: String -> CodeGraph -> String
 toHaskellCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
-                                      testname ++ "myEnv =\n" ++
+                                      testname ++ " myEnv =\n" ++
                                       "    runHaxl myEnv $ do\n" ++
                                       toHaskellCode graph ++ "\n"
 
