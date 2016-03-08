@@ -34,7 +34,7 @@
 --import Debug.Trace (trace)
 import           LevelGraphs (CodeGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
                               toGraphCodeWrapped, makeCondCGWithProb, 
-                              concatenateTests, genRandomCodeGraph,
+                              concatenateTests, listTests, genRandomCodeGraph,
                               genRandomCodeGraphBigDS, setSeed)
 import           Control.Monad.Random (evalRandIO)
 import           System.Console.CmdArgs
@@ -80,7 +80,10 @@ genExampleBenchmark lgArgs = let
                       "Graph" -> toGraphCodeWrapped
                       _ -> (\_ _ -> "Unexpected language case error")
     randomBenchmark = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
-    in liftM (concatenateTests toCodeWrapped) $ sequence (map (randomBenchmark weightMap typeWeights ifPercentage) lvllist)
+    concatenateFun = case lang of
+                       "Haskell" -> (\x y -> concatenateTests x y ++ "\nAllTests :: [((Env u -> IO Int),Int,Int)]\nAllTests = " ++ listTests y)
+                       _ -> concatenateTests
+    in liftM (concatenateFun toCodeWrapped) $ sequence (map (randomBenchmark weightMap typeWeights ifPercentage) lvllist)
 
 
 --  graphs <- Control.Monad.Random.evalRandIO singleString

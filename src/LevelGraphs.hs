@@ -36,7 +36,8 @@ module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toOhuaCodeWrapp
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
                     levelsLGraph, levelsCGraph, genRandomCodeGraphBigDS,
-                    nullGraph, nullLevelGraph, makeCondCGWithProb) where
+                    nullGraph, nullLevelGraph, makeCondCGWithProb,
+                    listTests) where
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
 import           Control.Monad.Random (MonadRandom,fromList, getRandomR)
@@ -435,12 +436,8 @@ toHaskellCode graph = helperToHaskellCode nodes ++ "\n"
       helperToHaskellCode ns = concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns
 
 toHaskellCodeWrapped :: String -> CodeGraph -> String
-toHaskellCodeWrapped testname graph = testname ++ " :: IO Int\n" ++
-                                      testname ++ " =\n" ++
-                                      "    let\n" ++
-                                      "        stateStore = stateSet DataSourceState stateEmpty\n" ++
-                                      "    in do\n" ++
-                                      "    myEnv <- initEnv stateStore ()\n" ++
+toHaskellCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
+                                      testname ++ "myEnv =\n" ++
                                       "    runHaxl myEnv $ do\n" ++
                                       toHaskellCode graph ++ "\n"
 
@@ -488,10 +485,20 @@ concatenateTests toCodeWrapped randomGraphs = singleString
     where
       randomGraphsNumbered = zip [0..] randomGraphs
       totallevels = maximum $ map levelsCGraph randomGraphs 
-      strings = map (\(x,y) -> toCodeWrapped ("run-test-level" ++ (show $ levelsCGraph y) ++ "-" ++ show (x `quot` totallevels)) y) randomGraphsNumbered
+      strings = map (\(x,y) -> toCodeWrapped ("run_test_level" ++ (show $ levelsCGraph y) ++ "_" ++ show (x `quot` totallevels)) y) randomGraphsNumbered
       singleString = List.intercalate "\n" strings
 
 
+listTests ::  [ CodeGraph ] -> String
+listTests randomGraphs = singleString
+    where
+      randomGraphsNumbered = zip [0..] randomGraphs
+      totallevels = maximum $ map levelsCGraph randomGraphs 
+      makeNameString (x,y) = "(run_test_level" ++ curLvlStr ++ "_" ++ curInstanceStr ++ ", " ++ curLvlStr ++ ", " ++ curInstanceStr ++ ")"
+          where curLvlStr = (show $ levelsCGraph y) 
+                curInstanceStr =  show (x `quot` totallevels)
+      strings = map makeNameString randomGraphsNumbered
+      singleString = "[" ++ (List.intercalate ", " strings) ++ "]"
 
 
 ------------------------------------------------------------
