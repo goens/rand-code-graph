@@ -433,7 +433,7 @@ toHaskellCode graph = helperToHaskellCode nodes ++ "\n"
     where 
       nodes = reverse $ cGraphTopSort graph --bottom up
       trSpace = "        "
-      helperToHaskellCode ns = concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns
+      helperToHaskellCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ nodeToUniqueNameHaskell (fst $ last ns) ++ "\n"
 
 toHaskellCodeWrapped :: String -> CodeGraph -> String
 toHaskellCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
