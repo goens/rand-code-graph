@@ -393,7 +393,7 @@ toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
       helperToOhuaCode (lvl:lvls) = "(" ++ (levelToOhua lvl) ++ "\n" ++ (helperToOhuaCode lvls) ++ ")"
 
 toOhuaCodeWrapped :: String -> CodeGraph -> String
-toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n" ++ toOhuaCode graph ++ ")" 
+toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(ohua\n" ++ toOhuaCode graph ++ "))"
 
 ------------------------------------------------------------
 -- Haskell Backend
