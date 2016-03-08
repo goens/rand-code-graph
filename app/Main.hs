@@ -81,7 +81,7 @@ genExampleBenchmark lgArgs = let
                       _ -> (\_ _ -> "Unexpected language case error")
     randomBenchmark = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
     concatenateFun = case lang of
-                       "Haskell" -> (\x y -> concatenateTests x y ++ "\nAllTests :: [((Env u -> IO Int),Int,Int)]\nAllTests = " ++ listTests y)
+                       "Haskell" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nAllTests = " ++ listTests y)
                        _ -> concatenateTests
     in liftM (concatenateFun toCodeWrapped) $ sequence (map (randomBenchmark weightMap typeWeights ifPercentage) lvllist)
 
