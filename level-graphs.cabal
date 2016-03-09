@@ -50,7 +50,7 @@ library
   build-depends:       base,
                        MonadRandom,
                        random,
-                       fgl,
+                       fgl >= 5.5.2,
                        containers
   hs-source-dirs:      src
   default-language:    Haskell98
