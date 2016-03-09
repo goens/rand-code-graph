@@ -122,6 +122,15 @@ levelsLGraph  = length . List.nub . (map snd) . Graph.labNodes
 levelsCGraph :: CodeGraph -> Int
 levelsCGraph  = length . List.nub . (map getLevelCGN) . Graph.labNodes
 
+subGraphFrom :: Gr a b -> Graph.Node -> Gr a b
+subGraphFrom graph start = Graph.subgraph sucnodes graph 
+    where 
+      sucfn = Graph.suc graph 
+      getSucs [] = []
+      getSucs nodes =  nodes ++ getSucs (concat $ map sucfn nodes)
+      sucnodes = getSucs [start]
+                     
+
 ------------------------------------------------------------
 -- Random-monad helper functions
 ------------------------------------------------------------
@@ -361,23 +370,23 @@ genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel =
 nodeToUniqueNameOhua :: Graph.Node -> String
 nodeToUniqueNameOhua  =  (++) "local-" . show 
 
-cgNodeToOhuaFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,DataSource)) = 
+cgNodeToOhuaFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,DataSource)) = 
     "(get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ show n  ++ ")"
-cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
+cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
     "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
-cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
     "(compute " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " " ++ show n ++ ")"
-cgNodeToOhuaFunction children (n,CodeGraphNodeLabel (_,SideEffect)) = 
+cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,SideEffect)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ show n ++ ")"
-cgNodeToOhuaFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
-    "(if " ++ List.intercalate " " (map maybeNodeToUniqueName [cond,trueBranch,falseBranch] ) ++ ")"
-           where maybeNodeToUniqueName CondNil = "nil"
-                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameOhua node
+cgNodeToOhuaFunction graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+    "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
+           where maybeNodeToSubgraph CondNil = "nil"
+                 maybeNodeToSubgraph (CondBranch node) = toOhuaCode $ subGraphFrom graph node
 
 
 cgNodeToOhuaLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhuaLetDef graph = (\x -> (nodeToUniqueNameOhua $ fst x) ++ " " ++ (cgNodeToOhuaFunction (Graph.suc graph $ fst x) x))
+cgNodeToOhuaLetDef graph = (\x -> (nodeToUniqueNameOhua $ fst x) ++ " " ++ (cgNodeToOhuaFunction graph (Graph.suc graph $ fst x) x))
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -389,7 +398,7 @@ toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levelToOhua levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToOhuaLetDef graph) levelNodes) ++ "]"
       helperToOhuaCode [] = ""
-      helperToOhuaCode [[lastLvlNode]] = cgNodeToOhuaFunction (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToOhuaCode [[lastLvlNode]] = cgNodeToOhuaFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
       helperToOhuaCode (lvl:lvls) = "(" ++ (levelToOhua lvl) ++ "\n" ++ (helperToOhuaCode lvls) ++ ")"
 
 toOhuaCodeWrapped :: String -> CodeGraph -> String
