@@ -368,29 +368,45 @@ genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel =
 
 
 ------------------------------------------------------------
--- Ohua Backend
+-- Clojure Backends
 ------------------------------------------------------------
 
-nodeToUniqueNameOhua :: Graph.Node -> String
-nodeToUniqueNameOhua  =  (++) "local-" . show 
+nodeToUniqueNameClojure :: Graph.Node -> String
+nodeToUniqueNameClojure  =  (++) "local-" . show 
 
-cgNodeToOhuaFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ show n  ++ ")"
-cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
-    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
-cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " " ++ show n ++ ")"
-cgNodeToOhuaFunction _ children (n,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameOhua children) ++ " \"service-name\" " ++ show n ++ ")"
-cgNodeToOhuaFunction graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+cgNodeToClojureFunction :: (CodeGraph -> String) -> CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,DataSource)) = 
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ show n  ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "(compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ show n ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect)) = 
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ show n ++ ")"
+cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
     "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
-                 maybeNodeToSubgraph (CondBranch node) = toOhuaCode $ subGraphFrom graph node
+                 maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
 
 
-cgNodeToOhuaLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhuaLetDef graph = (\x -> (nodeToUniqueNameOhua $ fst x) ++ " " ++ (cgNodeToOhuaFunction graph (Graph.suc graph $ fst x) x))
+cgNodeToClojureLetDef:: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
+
+-- assumes the level graph is connected!
+-- assumes the lowest level has exactly one element!
+-- (otherwise there is no call in the end)
+
+toMuseCode :: CodeGraph -> String
+toMuseCode graph = helperToMuseCode nodes ++ "\n"
+    where 
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (cgNodeToClojureLetDef toMuseCode graph) levelNodes) ++ "]"
+      helperToMuseCode [] = ""
+      helperToMuseCode [[lastLvlNode]] = (cgNodeToClojureFunction toMuseCode) graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToMuseCode (lvl:lvls) = "(" ++ (levelToMuse lvl) ++ "\n" ++ (helperToMuseCode lvls) ++ ")"
+
+toMuseCodeWrapped :: String -> CodeGraph -> String
+toMuseCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseCode graph ++ "))"
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -400,9 +416,9 @@ toOhuaCode :: CodeGraph -> String
 toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToOhua levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToOhuaLetDef graph) levelNodes) ++ "]"
+      levelToOhua levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToClojureLetDef toOhuaCode graph) levelNodes) ++ "]"
       helperToOhuaCode [] = ""
-      helperToOhuaCode [[lastLvlNode]] = cgNodeToOhuaFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToOhuaCode [[lastLvlNode]] = (cgNodeToClojureFunction toOhuaCode)  graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
       helperToOhuaCode (lvl:lvls) = "(" ++ (levelToOhua lvl) ++ "\n" ++ (helperToOhuaCode lvls) ++ ")"
 
 toOhuaCodeWrapped :: String -> CodeGraph -> String
@@ -478,51 +494,6 @@ toHaskellDoAppCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" +
                                       testname ++ " myEnv =\n" ++
                                       "    runHaxl myEnv $ do\n" ++
                                       toHaskellDoAppCode graph ++ "\n"
-
-
-------------------------------------------------------------
--- Muse Backend
-------------------------------------------------------------
-
-
-nodeToUniqueNameMuse :: Graph.Node -> String
-nodeToUniqueNameMuse  =  (++) "local-" . show 
-
-cgNodeToMuseFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " \"service-name\" " ++ show n  ++ ")"
-cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
-    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
-cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " " ++ show n ++ ")"
-cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " \"service-name\" " ++ show n ++ ")"
-cgNodeToMuseFunction graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
-    "\n\n !! MUSE CONDITIONALS NOT IMPLEMENTED YET !! \n\n"
---    "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
---           where maybeNodeToSubgraph CondNil = "nil"
---                 maybeNodeToSubgraph (CondBranch node) = toMuseCode $ subGraphFrom graph node
-
-
-cgNodeToMuseLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToMuseLetDef graph = (\x -> (nodeToUniqueNameMuse $ fst x) ++ " " ++ (cgNodeToMuseFunction graph (Graph.suc graph $ fst x) x))
-
--- assumes the level graph is connected!
--- assumes the lowest level has exactly one element!
--- (otherwise there is no call in the end)
-
-toMuseCode :: CodeGraph -> String
-toMuseCode graph = helperToMuseCode nodes ++ "\n"
-    where 
-      nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (cgNodeToMuseLetDef graph) levelNodes) ++ "]"
-      helperToMuseCode [] = ""
-      helperToMuseCode [[lastLvlNode]] = cgNodeToMuseFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
-      helperToMuseCode (lvl:lvls) = "(" ++ (levelToMuse lvl) ++ "\n" ++ (helperToMuseCode lvls) ++ ")"
-
-toMuseCodeWrapped :: String -> CodeGraph -> String
-toMuseCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseCode graph ++ "))"
-
 
 
 
