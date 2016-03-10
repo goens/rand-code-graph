@@ -32,6 +32,7 @@
 --   andres.goens@tu-dresden.de
 
 module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
+                    toMuseCodeWrapped, toHaskellCode, toOhuaCode, toMuseCode,
                     toGraphCodeWrapped, genRandomCodeGraph, setSeed,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
@@ -449,6 +450,52 @@ toHaskellCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
                                       testname ++ " myEnv =\n" ++
                                       "    runHaxl myEnv $ do\n" ++
                                       toHaskellCode graph ++ "\n"
+
+------------------------------------------------------------
+-- Muse Backend
+------------------------------------------------------------
+
+
+nodeToUniqueNameMuse :: Graph.Node -> String
+nodeToUniqueNameMuse  =  (++) "local-" . show 
+
+cgNodeToMuseFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,DataSource)) = 
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " \"service-name\" " ++ show n  ++ ")"
+cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
+cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+    "(compute " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " " ++ show n ++ ")"
+cgNodeToMuseFunction _ children (n,CodeGraphNodeLabel (_,SideEffect)) = 
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameMuse children) ++ " \"service-name\" " ++ show n ++ ")"
+cgNodeToMuseFunction graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+    "\n\n !! MUSE CONDITIONALS NOT IMPLEMENTED YET !! \n\n"
+--    "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
+--           where maybeNodeToSubgraph CondNil = "nil"
+--                 maybeNodeToSubgraph (CondBranch node) = toMuseCode $ subGraphFrom graph node
+
+
+cgNodeToMuseLetDef:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToMuseLetDef graph = (\x -> (nodeToUniqueNameMuse $ fst x) ++ " " ++ (cgNodeToMuseFunction graph (Graph.suc graph $ fst x) x))
+
+-- assumes the level graph is connected!
+-- assumes the lowest level has exactly one element!
+-- (otherwise there is no call in the end)
+
+toMuseCode :: CodeGraph -> String
+toMuseCode graph = helperToMuseCode nodes ++ "\n"
+    where 
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (cgNodeToMuseLetDef graph) levelNodes) ++ "]"
+      helperToMuseCode [] = ""
+      helperToMuseCode [[lastLvlNode]] = cgNodeToMuseFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToMuseCode (lvl:lvls) = "(" ++ (levelToMuse lvl) ++ "\n" ++ (helperToMuseCode lvls) ++ ")"
+
+toMuseCodeWrapped :: String -> CodeGraph -> String
+toMuseCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseCode graph ++ "))"
+
+
+
 
 ------------------------------------------------------------
 -- Graph Backend
