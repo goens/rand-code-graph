@@ -234,7 +234,9 @@ makeCondCGWithProb p gr =
   liftM Graph.buildGr transformed
     where
       unfolded = Graph.ufold (:) [] gr
-      transformed = flip Control.Monad.mapM unfolded $ condWithProb p 
+      makeCond ::  MonadRandom m => Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b) 
+      makeCond = \x@(_,node,_,_) -> if (null $ Graph.suc gr node) then return x else condWithProb p x
+      transformed = flip Control.Monad.mapM unfolded $ makeCond
       
 
 makeGraphRooted ::  a -> Gr a () -> Gr a ()
