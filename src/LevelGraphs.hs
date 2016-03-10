@@ -31,8 +31,9 @@
 --   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
-module LevelGraphs (CodeGraph, LevelGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
-                    toMuseCodeWrapped, toHaskellCode, toOhuaCode, toMuseCode,
+module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped,
+                    toMuseCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseCode,
+                    toHaskellDoAppCodeWrapped, toHaskellDoAppCode,
                     toGraphCodeWrapped, genRandomCodeGraph, setSeed,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
@@ -440,18 +441,44 @@ cgNodeToHaskellDoBind graph = (\x -> (nodeToUniqueNameHaskell $ fst x) ++ " <- "
 -- assumes the lowest level has exactly one element!
 -- (otherwise there is no call in the end)
 
-toHaskellCode :: CodeGraph -> String
-toHaskellCode graph = helperToHaskellCode nodes ++ "\n"
+cgNodesToApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
+cgNodesToApplicative graph [] = ""
+cgNodesToApplicative graph [node] = cgNodeToHaskellFunction (Graph.suc graph $ fst node) node 
+cgNodesToApplicative graph nodes = "(" ++ (flip replicate ',' $ pred $ length nodes) ++ ") <$> "  
+                                ++  (List.intercalate " <*> " (map (\x -> flip cgNodeToHaskellFunction x $ Graph.suc graph $ fst x) nodes)) 
+
+toHaskellDoCode :: CodeGraph -> String
+toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
     where 
       nodes = reverse $ cGraphTopSort graph --bottom up
-      trSpace = "        "
-      helperToHaskellCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueNameHaskell (fst $ last ns) ++ "\n"
+      trSpace = "  "
+      helperToHaskellDoCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueNameHaskell (fst $ last ns) ++ "\n"
 
-toHaskellCodeWrapped :: String -> CodeGraph -> String
-toHaskellCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
+toHaskellDoCodeWrapped :: String -> CodeGraph -> String
+toHaskellDoCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
                                       testname ++ " myEnv =\n" ++
                                       "    runHaxl myEnv $ do\n" ++
-                                      toHaskellCode graph ++ "\n"
+                                      toHaskellDoCode graph ++ "\n"
+
+
+toHaskellDoAppCode :: CodeGraph -> String
+toHaskellDoAppCode graph = helperToDoApp nodes ++ "\n"
+    where 
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levelToDoApp [levelNode] = (nodeToUniqueNameHaskell . fst) levelNode 
+                                ++ " <- " ++ cgNodesToApplicative graph [levelNode]
+      levelToDoApp levelNodes = "(" ++ List.intercalate ", " (map (nodeToUniqueNameHaskell . fst) levelNodes)
+                                ++ ") <- " ++ cgNodesToApplicative graph levelNodes
+      helperToDoApp [] = ""
+      helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToApplicative graph [lastLvlNode] ++ "\n"
+      helperToDoApp (lvl:lvls) = "        " ++ (levelToDoApp lvl) ++ "\n" ++ (helperToDoApp lvls)
+
+toHaskellDoAppCodeWrapped :: String -> CodeGraph -> String
+toHaskellDoAppCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
+                                      testname ++ " myEnv =\n" ++
+                                      "    runHaxl myEnv $ do\n" ++
+                                      toHaskellDoAppCode graph ++ "\n"
+
 
 ------------------------------------------------------------
 -- Muse Backend

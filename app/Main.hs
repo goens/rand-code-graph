@@ -32,9 +32,9 @@
 --   andres.goens@tu-dresden.de
 
 --import Debug.Trace (trace)
-import           LevelGraphs (CodeGraph, toHaskellCodeWrapped, toOhuaCodeWrapped,
-                              toGraphCodeWrapped, toMuseCodeWrapped, makeCondCGWithProb, 
-                              concatenateTests, listTests, genRandomCodeGraph,
+import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped,
+                              toGraphCodeWrapped, toMuseCodeWrapped, toHaskellDoAppCodeWrapped,
+                              makeCondCGWithProb, concatenateTests, listTests, genRandomCodeGraph,
                               genRandomCodeGraphBigDS, setSeed)
 import           Control.Monad.Random (evalRandIO)
 import           System.Console.CmdArgs
@@ -75,14 +75,15 @@ genExampleBenchmark lgArgs = let
     weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage]
     toCodeWrapped = case lang of
-                      "Haskell" -> toHaskellCodeWrapped
+                      "HaskellDo" -> toHaskellDoCodeWrapped
+                      "HaskellDoApp" -> toHaskellDoAppCodeWrapped
                       "Ohua" ->  toOhuaCodeWrapped
                       "Graph" -> toGraphCodeWrapped
                       "Muse" -> toMuseCodeWrapped
                       _ -> (\_ _ -> "Unexpected language case error")
     randomBenchmark = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
     concatenateFun = case lang of
-                       "Haskell" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
+                       "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
                        _ -> concatenateTests
     in liftM (concatenateFun toCodeWrapped) $ sequence (map (randomBenchmark weightMap typeWeights ifPercentage) lvllist)
 
@@ -142,7 +143,7 @@ checkArgs lgArgs = do
                do
                  return errorOcurred
   let lang = language lgArgs
-  errorOcurred <- if (lang == "Ohua" || lang == "Haskell" || lang == "Muse" || lang == "Graph") then
+  errorOcurred <- if (lang == "Ohua" || lang == "HaskellDoApp" || lang == "HaskellDo" || lang == "Muse" || lang == "Graph") then
                do
                  return errorOcurred
            else
