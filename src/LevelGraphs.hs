@@ -406,7 +406,7 @@ toMuseCode graph = helperToMuseCode nodes ++ "\n"
       helperToMuseCode (lvl:lvls) = "(" ++ (levelToMuse lvl) ++ "\n" ++ (helperToMuseCode lvls) ++ ")"
 
 toMuseCodeWrapped :: String -> CodeGraph -> String
-toMuseCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseCode graph ++ "))"
+toMuseCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(run!! \n" ++ toMuseCode graph ++ "))"
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
