@@ -32,7 +32,8 @@
 --   andres.goens@tu-dresden.de
 
 module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped,
-                    toMuseCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseCode,
+                    toMuseMonadCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseMonadCode,
+                    toMuseAppCode, toMuseAppCodeWrapped,
                     toHaskellDoAppCodeWrapped, toHaskellDoAppCode,
                     toGraphCodeWrapped, genRandomCodeGraph, setSeed,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
@@ -389,24 +390,57 @@ cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond
                  maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
 
 
-cgNodeToClojureLetDef:: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
+
+--cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+--cgNodeToClojureApplicative toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
 -- (otherwise there is no call in the end)
 
-toMuseCode :: CodeGraph -> String
-toMuseCode graph = helperToMuseCode nodes ++ "\n"
+toMuseMonadCode :: CodeGraph -> String
+toMuseMonadCode graph = helperToMuseCode nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (cgNodeToClojureLetDef toMuseCode graph) levelNodes) ++ "]"
+      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (cgNodeToClojureLetDef toMuseMonadCode graph) levelNodes) ++ "]"
       helperToMuseCode [] = ""
-      helperToMuseCode [[lastLvlNode]] = (cgNodeToClojureFunction toMuseCode) graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToMuseCode [[lastLvlNode]] = (cgNodeToClojureFunction toMuseMonadCode) graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
       helperToMuseCode (lvl:lvls) = "(" ++ (levelToMuse lvl) ++ "\n" ++ (helperToMuseCode lvls) ++ ")"
 
-toMuseCodeWrapped :: String -> CodeGraph -> String
-toMuseCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseCode graph ++ "))"
+
+cgNodesToMuseApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
+cgNodesToMuseApplicative graph [] = ""
+cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation))] = "(<$>" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_))] = "(" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "  
+                                ++  (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
+    where 
+      toValueCompute children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+          "compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " (value " ++ show n ++ ")"
+      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation)) =  \x -> "(<$> " ++ ((flip toValueCompute node) x) ++ ")"
+      toFun node@(_, CodeGraphNodeLabel (_,_)) = flip (cgNodeToClojureFunction toMuseAppCode graph) node
+
+toMuseMonadCodeWrapped :: String -> CodeGraph -> String
+toMuseMonadCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
+
+toMuseAppCode :: CodeGraph -> String
+toMuseAppCode graph = helperToMuseApp nodes ++ "\n"
+    where 
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " ( " ++ cgNodesToMuseApplicative graph [levelNode] ++ ")"
+      levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
+                                ++ "] ( " ++ cgNodesToMuseApplicative graph levelNodes ++ ")"
+      helperToMuseApp [] = ""
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "(return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ "\n"
+      helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls)
+
+toMuseAppCodeWrapped :: String -> CodeGraph -> String
+toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " (run!! (mlet \n" 
+                                      ++ toMuseAppCode graph ++ ")))\n"
+
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -457,10 +491,10 @@ cgNodeToHaskellDoBind graph = (\x -> (nodeToUniqueNameHaskell $ fst x) ++ " <- "
 -- assumes the lowest level has exactly one element!
 -- (otherwise there is no call in the end)
 
-cgNodesToApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
-cgNodesToApplicative graph [] = ""
-cgNodesToApplicative graph [node] = cgNodeToHaskellFunction (Graph.suc graph $ fst node) node 
-cgNodesToApplicative graph nodes = "(" ++ (flip replicate ',' $ pred $ length nodes) ++ ") <$> "  
+cgNodesToHaxlApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
+cgNodesToHaxlApplicative graph [] = ""
+cgNodesToHaxlApplicative graph [node] = cgNodeToHaskellFunction (Graph.suc graph $ fst node) node 
+cgNodesToHaxlApplicative graph nodes = "(" ++ (flip replicate ',' $ pred $ length nodes) ++ ") <$> "  
                                 ++  (List.intercalate " <*> " (map (\x -> flip cgNodeToHaskellFunction x $ Graph.suc graph $ fst x) nodes)) 
 
 toHaskellDoCode :: CodeGraph -> String
@@ -482,11 +516,11 @@ toHaskellDoAppCode graph = helperToDoApp nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levelToDoApp [levelNode] = (nodeToUniqueNameHaskell . fst) levelNode 
-                                ++ " <- " ++ cgNodesToApplicative graph [levelNode]
+                                ++ " <- " ++ cgNodesToHaxlApplicative graph [levelNode]
       levelToDoApp levelNodes = "(" ++ List.intercalate ", " (map (nodeToUniqueNameHaskell . fst) levelNodes)
-                                ++ ") <- " ++ cgNodesToApplicative graph levelNodes
+                                ++ ") <- " ++ cgNodesToHaxlApplicative graph levelNodes
       helperToDoApp [] = ""
-      helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToApplicative graph [lastLvlNode] ++ "\n"
+      helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToHaxlApplicative graph [lastLvlNode] ++ "\n"
       helperToDoApp (lvl:lvls) = "        " ++ (levelToDoApp lvl) ++ "\n" ++ (helperToDoApp lvls)
 
 toHaskellDoAppCodeWrapped :: String -> CodeGraph -> String

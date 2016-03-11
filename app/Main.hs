@@ -33,7 +33,8 @@
 
 --import Debug.Trace (trace)
 import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped,
-                              toGraphCodeWrapped, toMuseCodeWrapped, toHaskellDoAppCodeWrapped,
+                              toGraphCodeWrapped, toMuseAppCodeWrapped,
+                              toMuseMonadCodeWrapped, toHaskellDoAppCodeWrapped,
                               makeCondCGWithProb, concatenateTests, listTests, genRandomCodeGraph,
                               genRandomCodeGraphBigDS, setSeed)
 import           Control.Monad.Random (evalRandIO)
@@ -79,7 +80,8 @@ genExampleBenchmark lgArgs = let
                       "HaskellDoApp" -> toHaskellDoAppCodeWrapped
                       "Ohua" ->  toOhuaCodeWrapped
                       "Graph" -> toGraphCodeWrapped
-                      "Muse" -> toMuseCodeWrapped
+                      "MuseMonad" -> toMuseMonadCodeWrapped
+                      "MuseApp" -> toMuseAppCodeWrapped
                       _ -> (\_ _ -> "Unexpected language case error")
     randomBenchmark = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
     concatenateFun = case lang of
@@ -144,7 +146,7 @@ checkArgs lgArgs = do
                do
                  return errorOcurred
   let lang = language lgArgs
-  errorOcurred <- if (lang == "Ohua" || lang == "HaskellDoApp" || lang == "HaskellDo" || lang == "Muse" || lang == "Graph") then
+  errorOcurred <- if (lang == "Ohua" || lang == "HaskellDoApp" || lang == "HaskellDo" || lang == "MuseApp"  || lang == "MuseMonad" || lang == "Graph") then
                do
                  return errorOcurred
            else
