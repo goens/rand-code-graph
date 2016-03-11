@@ -417,9 +417,9 @@ cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_))] = "(" ++ (c
 cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "  
                                 ++  (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
     where 
-      toValueCompute children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
-          "compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " (value " ++ show n ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation)) =  \x -> "(<$> " ++ ((flip toValueCompute node) x) ++ ")"
+      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+          "compute " ++ List.intercalate " " (map (\x -> "(return " ++ nodeToUniqueNameClojure x ++ ")" ) children) ++ " (return " ++ show n ++ ")"
+      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation)) =  \x -> "(<$> " ++ ((flip toReturnCompute node) x) ++ ")"
       toFun node@(_, CodeGraphNodeLabel (_,_)) = flip (cgNodeToClojureFunction toMuseAppCode graph) node
 
 toMuseMonadCodeWrapped :: String -> CodeGraph -> String
@@ -434,7 +434,7 @@ toMuseAppCode graph = helperToMuseApp nodes ++ "\n"
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
       helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "] (return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = "]" ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ "\n"
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = "]" ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode 
       helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls)
 
 toMuseAppCodeWrapped :: String -> CodeGraph -> String
