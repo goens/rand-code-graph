@@ -561,11 +561,6 @@ listTests randomGraphs = singleString
 -- Test Area
 ------------------------------------------------------------
 
--- codeGraphNodetoOhua :: Graph.LNode (Level,ComputationType) -> String
--- codeGraphNodetoOhua (a,b,(level,ctype)) = case ctype of DataSource -> "foo"
---                                                         OtherComputation -> "bar"
-
-
 --main = do
 --  str <- Control.Monad.Random.evalRandIO someExampleStringsVarLength
 --  putStrLn str
@@ -573,16 +568,6 @@ listTests randomGraphs = singleString
 -- ----------------
 --      TO-DO
 -- ----------------
--- Graph Types:
---   - Make CodeGraphs have (nested) if-clauses
---   - Make Graphs with DataSinks (like sources)
--- 
--- Code Generation:
---   - Make a Haskell (Haxl) example out of the Ohua example
---   - Adapt backend based on example for generating Haskell (Haxl) code 
---
--- Random statistics:
---   - Create some larger test-suite generating functions: include just increasing number of levels
 --
 --     OPTIONAL:
 --
@@ -591,9 +576,5 @@ listTests randomGraphs = singleString
 --     which take statistics and not fixed numbers.
 --   - Think about the probabilities for the full graphs which are implied by
 --     the way the probabilities are currently done
-
--- Idea to make the conditionals:
--- for <= 3 children: fill up with nils. what about haskell?
--- for > 3 children: group up. But how is most 'realistic'? I'm basically adding a level by grouping up...
 
 
