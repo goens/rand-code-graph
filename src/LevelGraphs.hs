@@ -423,7 +423,7 @@ cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "
       toFun node@(_, CodeGraphNodeLabel (_,_)) = flip (cgNodeToClojureFunction toMuseAppCode graph) node
 
 toMuseMonadCodeWrapped :: String -> CodeGraph -> String
-toMuseMonadCodeWrapped testname graph = "(deftest " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
+toMuseMonadCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
 
 toMuseAppCode :: CodeGraph -> String
 toMuseAppCode graph = helperToMuseApp nodes ++ "\n"
