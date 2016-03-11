@@ -429,16 +429,16 @@ toMuseAppCode :: CodeGraph -> String
 toMuseAppCode graph = helperToMuseApp nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " ( " ++ cgNodesToMuseApplicative graph [levelNode] ++ ")"
+      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToMuseApplicative graph [levelNode]
       levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
-                                ++ "] ( " ++ cgNodesToMuseApplicative graph levelNodes ++ ")"
+                                ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "(return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ "\n"
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "] (return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = "]" ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ "\n"
       helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls)
 
 toMuseAppCodeWrapped :: String -> CodeGraph -> String
-toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " (run!! (mlet \n" 
+toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " [] (run!! (mlet [ \n" 
                                       ++ toMuseAppCode graph ++ ")))\n"
 
 
