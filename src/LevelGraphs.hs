@@ -433,13 +433,14 @@ toMuseAppCode graph = helperToMuseApp nodes ++ "\n"
       levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "] (return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = "]" ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode 
-      helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls)
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "(return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = cgNodeToClojureFunction toMuseAppCode graph [] lastnode
+      helperToMuseApp (lvl:lvls) = if (length lvls) == 0
+                                   then (helperToMuseApp lvls)
+                                   else "(mlet [ " ++ (levelToDoApp lvl) ++ "] \n" ++ (helperToMuseApp lvls) ++ ")"
 
 toMuseAppCodeWrapped :: String -> CodeGraph -> String
-toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " [] (run!! (mlet [ \n" 
-                                      ++ toMuseAppCode graph ++ ")))\n"
+toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " [] (run!! \n" ++ toMuseAppCode graph ++ "))\n"
 
 
 -- assumes the level graph is connected!
@@ -477,12 +478,14 @@ toOhuaAppCode graph = helperToOhuaApp nodes ++ "\n"
       levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
       helperToOhuaApp [] = ""
-      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "] " ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
-      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = "]" ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
-      helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls)
+      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp (lvl:lvls) = if (length lvls) == 0
+                                   then (helperToOhuaApp lvls)
+                                   else "(let [ " ++ (levelToDoApp lvl) ++ "] \n" ++ (helperToOhuaApp lvls) ++ ")"
 
 toOhuaAppCodeWrapped :: String -> CodeGraph -> String
-toOhuaAppCodeWrapped testname graph = "(defn " ++ testname ++ " []\n (ohua (let [ \n" ++ toOhuaAppCode graph ++ ")))\n"
+toOhuaAppCodeWrapped testname graph = "(defn " ++ testname ++ " []\n (ohua \n" ++ toOhuaAppCode graph ++ "))\n"
 
 ------------------------------------------------------------
 -- Haskell Backend
