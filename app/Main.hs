@@ -32,7 +32,7 @@
 --   andres.goens@tu-dresden.de
 
 --import Debug.Trace (trace)
-import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped,
+import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped, toOhuaAppCodeWrapped,
                               toGraphCodeWrapped, toMuseAppCodeWrapped,
                               toMuseMonadCodeWrapped, toHaskellDoAppCodeWrapped,
                               makeCondCGWithProb, concatenateTests, listTests, genRandomCodeGraph,
@@ -79,6 +79,7 @@ genExampleBenchmark lgArgs = let
                       "HaskellDo" -> toHaskellDoCodeWrapped
                       "HaskellDoApp" -> toHaskellDoAppCodeWrapped
                       "Ohua" ->  toOhuaCodeWrapped
+                      "OhuaApp" ->  toOhuaAppCodeWrapped
                       "Graph" -> toGraphCodeWrapped
                       "MuseMonad" -> toMuseMonadCodeWrapped
                       "MuseApp" -> toMuseAppCodeWrapped
@@ -146,7 +147,7 @@ checkArgs lgArgs = do
                do
                  return errorOcurred
   let lang = language lgArgs
-  errorOcurred <- if (lang == "Ohua" || lang == "HaskellDoApp" || lang == "HaskellDo" || lang == "MuseApp"  || lang == "MuseMonad" || lang == "Graph") then
+  errorOcurred <- if (lang == "Ohua" || lang == "OhuaApp" || lang == "HaskellDoApp" || lang == "HaskellDo" || lang == "MuseApp"  || lang == "MuseMonad" || lang == "Graph") then
                do
                  return errorOcurred
            else

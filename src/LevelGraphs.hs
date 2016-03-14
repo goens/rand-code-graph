@@ -31,7 +31,7 @@
 --   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
-module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped,
+module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped, toOhuaAppCodeWrapped,
                     toMuseMonadCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseMonadCode,
                     toMuseAppCode, toMuseAppCodeWrapped,
                     toHaskellDoAppCodeWrapped, toHaskellDoAppCode,
@@ -457,6 +457,32 @@ toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
 
 toOhuaCodeWrapped :: String -> CodeGraph -> String
 toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(ohua\n" ++ toOhuaCode graph ++ "))"
+
+cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
+cgNodesToOhuaApplicative graph [] = ""
+cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,_))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToOhuaApplicative graph nodes = "(vector " ++ (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
+    where
+      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation)) =
+          "compute " ++ List.intercalate " " (map (\x -> nodeToUniqueNameClojure x ) children) ++ " " ++ show n
+      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation)) =  \x -> "(" ++ ((flip toReturnCompute node) x) ++ ")"
+      toFun node@(_, CodeGraphNodeLabel (_,_)) = flip (cgNodeToClojureFunction toOhuaAppCode graph) node
+
+toOhuaAppCode :: CodeGraph -> String
+toOhuaAppCode graph = helperToOhuaApp nodes ++ "\n"
+    where
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToOhuaApplicative graph [levelNode]
+      levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
+                                ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
+      helperToOhuaApp [] = ""
+      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "] " ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = "]" ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls)
+
+toOhuaAppCodeWrapped :: String -> CodeGraph -> String
+toOhuaAppCodeWrapped testname graph = "(defn " ++ testname ++ " []\n (ohua (let [ \n" ++ toOhuaAppCode graph ++ ")))\n"
 
 ------------------------------------------------------------
 -- Haskell Backend
