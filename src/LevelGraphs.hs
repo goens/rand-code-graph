@@ -33,8 +33,8 @@
 
 module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped, toOhuaAppCodeWrapped,
                     toMuseMonadCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseMonadCode,
-                    toMuseAppCode, toMuseAppCodeWrapped,
-                    toHaskellDoAppCodeWrapped, toHaskellDoAppCode,
+                    toMuseAppCode, toMuseAppCodeWrapped,makeCodeGraphTimed,
+                    toHaskellDoAppCodeWrapped, toHaskellDoAppCode, makeCodeGraphRandomlyTimed,
                     toGraphCodeWrapped, genRandomCodeGraph, setSeed,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
@@ -44,6 +44,7 @@ module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWra
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
 import           Control.Monad.Random (MonadRandom,fromList, getRandomR)
+import           Data.Maybe           (fromMaybe)
 
 import qualified System.Random        (mkStdGen, setStdGen)
 
@@ -65,14 +66,14 @@ data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
 type Level = Int
 
-newtype CodeGraphNodeLabel = CodeGraphNodeLabel (Level,ComputationType) deriving (Show,Eq)
+newtype CodeGraphNodeLabel = CodeGraphNodeLabel (Level,ComputationType, Maybe Int) deriving (Show,Eq)
 
 type LevelGraph = Data.Graph.Inductive.Gr Level () -- There can only be edges (a,b) if level a < level b
 type CodeGraph = Gr CodeGraphNodeLabel ()
 
 
 instance Ord CodeGraphNodeLabel where
-    (<=) (CodeGraphNodeLabel (lvl,_)) (CodeGraphNodeLabel (lvl',_)) = lvl <= lvl'
+    (<=) (CodeGraphNodeLabel (lvl,_,_)) (CodeGraphNodeLabel (lvl',_,_)) = lvl <= lvl'
 
 -- instance Eq CodeGraphNodeLabel where
 --     (==) (CodeGraphNodeLabel (lvl,ctype)) (CodeGraphNodeLabel (lvl',ctype')) = lvl == lvl' && ctype == ctype'
@@ -93,7 +94,7 @@ minLevel :: LevelGraph -> Level
 minLevel = minimum . (map snd) . Graph.labNodes
 
 getLevelCGN :: (Int,CodeGraphNodeLabel) -> Level
-getLevelCGN = ((\(CodeGraphNodeLabel (lvl,_)) -> lvl ) . snd)
+getLevelCGN = ((\(CodeGraphNodeLabel (lvl,_,_)) -> lvl ) . snd)
 
 minLevelCG :: CodeGraph -> Level
 minLevelCG = minimum . (map getLevelCGN) . Graph.labNodes
@@ -117,7 +118,7 @@ cGraphLevelSort graph = [ subList l | l <- levels ]
   where 
     topSort = cGraphTopSort graph
     levels = List.nub $ map getLevelCGN topSort
-    subList l = [ (node,CodeGraphNodeLabel (l',ctype)) |  (node,CodeGraphNodeLabel (l',ctype)) <- topSort, l'==l]
+    subList l = [ (node,CodeGraphNodeLabel (l',ctype,time)) |  (node,CodeGraphNodeLabel (l',ctype,time)) <- topSort, l'==l]
 
 levelsLGraph :: LevelGraph -> Int
 levelsLGraph  = length . List.nub . (map snd) . Graph.labNodes
@@ -175,14 +176,14 @@ ctWithProb ps =
     in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation] (ps' ++ [1 - (sum ps')]) 
 
 condWithProb :: MonadRandom m => Double -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
-condWithProb p oldctx@(pre,node,CodeGraphNodeLabel (lvl,_),children) = 
+condWithProb p oldctx@(pre,node,CodeGraphNodeLabel (lvl,_,_),children) = 
     if (length children > 3 || length children < 3) then return oldctx -- until we figure out a better way
     else newctx >>= (\x -> return [(x,p'), (oldctx,1-p') ]) >>= Control.Monad.Random.fromList 
          where p' = toRational p
                randomBranches :: MonadRandom m => m [Maybe Graph.Node]
                randomBranches = knuthShuffle $ take 3 $ (map Just $ map snd children) ++ [Nothing,Nothing,Nothing]
                randomConditional = liftM mkConditional $ randomBranches
-               newctx = liftM  (\x -> (pre,node,CodeGraphNodeLabel (lvl, x),children)) randomConditional
+               newctx = liftM  (\x -> (pre,node,CodeGraphNodeLabel (lvl, x,Nothing),children)) randomConditional
 
 
 emptyWithProb :: MonadRandom m => Double -> [a] -> m [a]
@@ -210,8 +211,8 @@ mkConditional incompleteList = mkConditional (incompleteList ++ [Nothing])
 addLevelContext :: Level -> Graph.Context () b -> Graph.Context Level b
 addLevelContext level (pre,node,(),after) = (pre,node,level,after)
 
-addCodeContext :: ComputationType -> Graph.Context Level b -> Graph.Context CodeGraphNodeLabel b
-addCodeContext ctype (pre,node,lvl,after) = (pre,node,CodeGraphNodeLabel (lvl,ctype),after)
+addCodeContext :: ComputationType -> Maybe Int -> Graph.Context Level b -> Graph.Context CodeGraphNodeLabel b
+addCodeContext ctype time (pre,node,lvl,after) = (pre,node,CodeGraphNodeLabel (lvl,ctype,time),after)
 
 graph2LevelGraph ::  Level -> Gr () () -> LevelGraph
 graph2LevelGraph level gr = Graph.buildGr (List.map (addLevelContext level) unfolded)
@@ -221,7 +222,7 @@ qlEdge2Edge :: Graph.LEdge () -> Graph.Edge
 qlEdge2Edge (a,b,()) = (a,b)
 
 makeCodeGraph :: ComputationType -> LevelGraph -> CodeGraph
-makeCodeGraph ctype = Graph.nmap (\l -> CodeGraphNodeLabel (l,ctype) ) 
+makeCodeGraph ctype = Graph.nmap (\l -> CodeGraphNodeLabel (l,ctype,Nothing) ) 
 
 -- Makes a level graph into a code graph with a probability p for being a DataSource for every node
 makeRandomCodeGraph :: MonadRandom m => [Double] -> LevelGraph -> m CodeGraph 
@@ -229,7 +230,7 @@ makeRandomCodeGraph probsCT gr = liftM Graph.buildGr transformed
     where 
       unfolded = Graph.ufold (:) [] gr
       transformed = flip Control.Monad.mapM unfolded $ \ctx -> do ctype <- ctWithProb probsCT
-                                                                  return $ addCodeContext ctype ctx
+                                                                  return $ addCodeContext ctype Nothing ctx
 
 makeCondCGWithProb :: MonadRandom m => Double -> CodeGraph -> m CodeGraph
 makeCondCGWithProb p gr = 
@@ -257,13 +258,21 @@ makeGraphUnbalancedBigTree graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootno
     where
       unocupied = (+1) $ snd $ Graph.nodeRange graph
       startlvl =  (pred . minLevelCG) graph
-      rootnodelabel = CodeGraphNodeLabel (startlvl,OtherComputation)
-      bigsource = (succ unocupied, CodeGraphNodeLabel (succ startlvl, SlowDataSource))
+      rootnodelabel = CodeGraphNodeLabel (startlvl,OtherComputation,Nothing)
+      bigsource = (succ unocupied, CodeGraphNodeLabel (succ startlvl, SlowDataSource,Nothing))
       oldEdges = Graph.labEdges graph
       oldNodes = Graph.labNodes graph
       oldNodes' = map fst $ Graph.labNodes graph
       newEdges' = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
       newEdges = (unocupied,unocupied+1,()):newEdges'
+
+
+makeCGNodeTimed :: Int -> CodeGraphNodeLabel -> CodeGraphNodeLabel
+makeCGNodeTimed n = (\(CodeGraphNodeLabel (l,ctype,_)) -> CodeGraphNodeLabel (l,ctype,Just n) ) 
+
+makeCodeGraphTimed :: Int -> CodeGraph  -> CodeGraph
+makeCodeGraphTimed = Graph.nmap . makeCGNodeTimed 
+
 
 ------------------------------------------------------------
 -- Basic graph families
@@ -367,6 +376,25 @@ genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel =
       codeGraph' = levelGraph >>= (makeRandomCodeGraph cTypeProb) 
   in liftM makeGraphUnbalancedBigTree codeGraph'
 
+-- makeCodeGraphRandomlyTimed :: MonadRandom m => Int -> CodeGraph  -> m CodeGraph
+-- makeCodeGraphRandomlyTimed n graph = liftM2 (flip Graph.nmap) (return graph) <=< makeTimed
+--     where 
+--         makeTimed :: MonadRandom m => CodeGraphNodeLabel ->  m CodeGraphNodeLabel
+--         makeTimed label = do 
+--           randn <- getRandomR (1,n)
+--           return $ (\(CodeGraphNodeLabel (l,ctype,_)) -> CodeGraphNodeLabel (l,ctype,Just randn)) label
+
+makeCodeGraphRandomlyTimed :: MonadRandom m => Int -> CodeGraph  -> m CodeGraph
+makeCodeGraphRandomlyTimed n gr = liftM Graph.buildGr transformed
+    where 
+      unfolded = Graph.ufold (:) [] gr
+      transformed = flip Control.Monad.mapM unfolded $ \ctx -> do newn <- getRandomR (1,n)
+                                                                  return $ (\(pre,node,label,after) -> (pre,node, makeCGNodeTimed newn label, after)) ctx
+
+-- nmapM :: (Graph.DynGraph gr, MonadRandom m) => (a -> m c) -> gr a b -> m (gr c b)
+-- nmapM f = gmapM (\(p,v,l,s)->(p,v,f l,s))
+--     where 
+--       gmapM f = ufold (\c->(f c&)) empty
 
 ------------------------------------------------------------
 -- Clojure Backends
@@ -376,15 +404,15 @@ nodeToUniqueNameClojure :: Graph.Node -> String
 nodeToUniqueNameClojure  =  (++) "local-" . show 
 
 cgNodeToClojureFunction :: (CodeGraph -> String) -> CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,DataSource)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ show n  ++ ")"
-cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
-    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show (10000 +  n))  ++ ")"
-cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "(compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ show n ++ ")"
-cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ show n ++ ")"
-cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,DataSource,time)) = 
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SlowDataSource,time)) = 
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
+    "(compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ (show $ fromMaybe n time) ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
     "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
                  maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
@@ -412,15 +440,15 @@ toMuseMonadCode graph = helperToMuseCode nodes ++ "\n"
 
 cgNodesToMuseApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToMuseApplicative graph [] = ""
-cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation))] = "(<$>" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
-cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_))] = "(" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation,_))] = "(<$>" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_,_))] = "(" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
 cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "  
                                 ++  (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
     where 
-      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
+      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation,_)) = 
           "compute " ++ List.intercalate " " (map (\x -> "(return " ++ nodeToUniqueNameClojure x ++ ")" ) children) ++ " (return " ++ show n ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation)) =  \x -> "(<$> " ++ ((flip toReturnCompute node) x) ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,_)) = flip (cgNodeToClojureFunction toMuseAppCode graph) node
+      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation,_)) =  \x -> "(<$> " ++ ((flip toReturnCompute node) x) ++ ")"
+      toFun node@(_, CodeGraphNodeLabel (_,_,_)) = flip (cgNodeToClojureFunction toMuseAppCode graph) node
 
 toMuseMonadCodeWrapped :: String -> CodeGraph -> String
 toMuseMonadCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
@@ -499,15 +527,15 @@ helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map n
     where listStart = if null children then "" else ", "
 
 cgNodeToHaskellFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,DataSource)) = 
-    "getData \"service-name\" [" ++ show n ++ helperNodeToHaskellFunction children
-cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SlowDataSource)) = 
-    "slowGetData \"service-name\" [" ++ show (10000 + n) ++ helperNodeToHaskellFunction children
-cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,OtherComputation)) = 
-    "compute [" ++ show n ++  helperNodeToHaskellFunction children
-cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SideEffect)) = 
-    "writeData \"service-name\" [" ++ show n ++  helperNodeToHaskellFunction children
-cgNodeToHaskellFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch)) = 
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,DataSource,time)) = 
+    "getData \"service-name\" [" ++ (show $ fromMaybe n time) ++ helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SlowDataSource, time)) = 
+    "slowGetData \"service-name\" [" ++ (show $ 10000 + fromMaybe n time) ++ helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
+    "compute [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children
+cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
+    "writeData \"service-name\" [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children
+cgNodeToHaskellFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
     "if " ++ (maybeNodeToUniqueName cond) ++ " then " ++ (maybeNodeToUniqueName trueBranch) ++ " else " ++  (maybeNodeToUniqueName falseBranch)
            where maybeNodeToUniqueName CondNil = "nil"
                  maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameHaskell node

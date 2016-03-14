@@ -33,14 +33,15 @@
 
 --import Debug.Trace (trace)
 import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped, toOhuaAppCodeWrapped,
-                              toGraphCodeWrapped, toMuseAppCodeWrapped,
+                              toGraphCodeWrapped, toMuseAppCodeWrapped, makeCodeGraphRandomlyTimed,
                               toMuseMonadCodeWrapped, toHaskellDoAppCodeWrapped,
                               makeCondCGWithProb, concatenateTests, listTests, genRandomCodeGraph,
                               genRandomCodeGraphBigDS, setSeed)
 import           Control.Monad.Random (evalRandIO)
 import           System.Console.CmdArgs
+import           Data.Maybe (fromMaybe,fromJust,isJust)
 import           Control.Monad.Random (MonadRandom,fromList)
-import           Control.Monad (liftM)
+import           Control.Monad (liftM,(<=<))
 import qualified Data.Map.Strict                                             as Map
 ------------------------------------------------------------
 -- Benchmark Code
@@ -70,6 +71,7 @@ genExampleBenchmark lgArgs = let
     sinkPercentage = percentageSinks lgArgs
     ifPercentage = percentageIfs lgArgs
     slowDS = slowdatasource lgArgs
+    cache = cachenum lgArgs
 
     -- Derivated data structures
     lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..0]) [] [1..total]
@@ -84,7 +86,9 @@ genExampleBenchmark lgArgs = let
                       "MuseMonad" -> toMuseMonadCodeWrapped
                       "MuseApp" -> toMuseAppCodeWrapped
                       _ -> (\_ _ -> "Unexpected language case error")
-    randomBenchmark = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
+    randomBenchmark' = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
+    randomBenchmark = if isJust cache 
+                      then (\wMap tWe ifPer lvl -> makeCodeGraphRandomlyTimed (fromJust cache) =<< (randomBenchmark' wMap tWe ifPer lvl)) else randomBenchmark'
     concatenateFun = case lang of
                        "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
                        "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
@@ -109,6 +113,7 @@ data LGCmdArgs = LGCmdArgs {output :: String,
                             percentageSinks :: Double,
                             percentageIfs :: Double,
                             slowdatasource :: Bool,
+                            cachenum :: Maybe Int,
                             preamble :: Maybe FilePath
                            } deriving (Show, Data, Typeable)
 
@@ -122,6 +127,7 @@ lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no ou
                        percentageSinks = 0 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
                        percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0",
                        preamble = def &= name "p" &= help "Prepend some code to the generated code.",
+                       cachenum = Nothing &= name "c" &= help "Make a results that are cachable. Will generate from c possible requests. If flag is not present, caching is off. In this case all requests are different.",
                        slowdatasource = False &= name "S" &= help "Include a slow data source at one side."
                       }
             &= summary "Level-graphs: generates random level graphs, v-0.1.0.0"
@@ -133,6 +139,15 @@ checkArgs lgArgs = do
   errorOcurred <- if l <= 0 then
                do
                  print "Error: Non-positive level!"
+                 return True
+           else
+               do
+                 return errorOcurred
+
+  let c = cachenum lgArgs
+  errorOcurred <- if fromMaybe 1 c <= 0 then
+               do
+                 print "Error: Non-positive nomber request types (cache)!"
                  return True
            else
                do
