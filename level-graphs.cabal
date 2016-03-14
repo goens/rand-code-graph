@@ -58,6 +58,7 @@ library
 executable random-level-graphs
   build-depends:       base,
                        level-graphs,
+                       random,
                        cmdargs,
                        MonadRandom,
                        containers

@@ -35,7 +35,7 @@ module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWra
                     toMuseMonadCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseMonadCode,
                     toMuseAppCode, toMuseAppCodeWrapped,makeCodeGraphTimed,
                     toHaskellDoAppCodeWrapped, toHaskellDoAppCode, makeCodeGraphRandomlyTimed,
-                    toGraphCodeWrapped, genRandomCodeGraph, setSeed,
+                    toGraphCodeWrapped, genRandomCodeGraph, setSeed, nullCodeGraph,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
                     levelsLGraph, levelsCGraph, genRandomCodeGraphBigDS,
@@ -288,6 +288,9 @@ nullGraph n = Graph.mkUGraph [1..n] []
 
 nullLevelGraph :: Level -> Int -> LevelGraph
 nullLevelGraph level n = Graph.buildGr $ List.map (\x -> ([],x,level,[])) [1..n]
+
+nullCodeGraph :: ComputationType -> Level -> Int -> CodeGraph
+nullCodeGraph ctype lvl n  = (makeCodeGraph ctype) $ nullLevelGraph lvl n
 
 ------------------------------------------------------------
 -- Graph generating functions from graphs

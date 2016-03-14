@@ -36,12 +36,16 @@ import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapp
                               toGraphCodeWrapped, toMuseAppCodeWrapped, makeCodeGraphRandomlyTimed,
                               toMuseMonadCodeWrapped, toHaskellDoAppCodeWrapped,
                               makeCondCGWithProb, concatenateTests, listTests, genRandomCodeGraph,
-                              genRandomCodeGraphBigDS, setSeed)
-import           Control.Monad.Random (evalRandIO)
+                              genRandomCodeGraphBigDS)
+import           Control.Monad.Random (runRand, evalRand)
+import qualified System.Random (mkStdGen, getStdGen, StdGen)
+import           Data.Traversable (mapAccumL)
+import           Data.Tuple (swap)
 import           System.Console.CmdArgs
+import           Control.Arrow (first)
 import           Data.Maybe (fromMaybe,fromJust,isJust)
 import           Control.Monad.Random (MonadRandom,fromList)
-import           Control.Monad (liftM,(<=<))
+import           Control.Monad (liftM)
 import qualified Data.Map.Strict                                             as Map
 ------------------------------------------------------------
 -- Benchmark Code
@@ -60,7 +64,7 @@ randomExampleBenchmarkBDS :: MonadRandom m => Map.Map (Int,Int) Double -> [Doubl
 randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraphBigDS weightMap typeWeights >>= makeCondCGWithProb ifPercentage
 
 
-genExampleBenchmark :: MonadRandom m => LGCmdArgs -> m String
+genExampleBenchmark :: LGCmdArgs -> String
 genExampleBenchmark lgArgs = let
 
     -- Options (arguments)
@@ -72,6 +76,7 @@ genExampleBenchmark lgArgs = let
     ifPercentage = percentageIfs lgArgs
     slowDS = slowdatasource lgArgs
     cache = cachenum lgArgs
+    stdGen = System.Random.mkStdGen $ seed lgArgs
 
     -- Derivated data structures
     lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..0]) [] [1..total]
@@ -86,14 +91,22 @@ genExampleBenchmark lgArgs = let
                       "MuseMonad" -> toMuseMonadCodeWrapped
                       "MuseApp" -> toMuseAppCodeWrapped
                       _ -> (\_ _ -> "Unexpected language case error")
-    randomBenchmark' = if slowDS then randomExampleBenchmarkBDS else randomExampleBenchmark 
-    randomBenchmark = if isJust cache 
-                      then (\wMap tWe ifPer lvl -> makeCodeGraphRandomlyTimed (fromJust cache) =<< (randomBenchmark' wMap tWe ifPer lvl)) else randomBenchmark'
+    randomBenchmark' = if slowDS then randomExampleBenchmarkBDS weightMap typeWeights ifPercentage else randomExampleBenchmark weightMap typeWeights ifPercentage
+    randomBenchmark :: System.Random.StdGen -> Int -> (CodeGraph, System.Random.StdGen)
+    randomBenchmark gen = 
+        if
+            isJust cache 
+        then 
+            (\lvl ->  Control.Arrow.first (\x -> flip evalRand gen $ makeCodeGraphRandomlyTimed (fromJust cache) x) $  -- first f '=' (f,id)
+                      runRand (randomBenchmark' lvl) gen 
+            )
+        else
+            (\lvl -> runRand (randomBenchmark' lvl) gen)
     concatenateFun = case lang of
                        "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
                        "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
                        _ -> concatenateTests
-    in liftM (concatenateFun toCodeWrapped) $ sequence (map (randomBenchmark weightMap typeWeights ifPercentage) lvllist)
+    in concatenateFun toCodeWrapped $ snd $ mapAccumL (\x y -> swap $ randomBenchmark x y) stdGen lvllist
 
 
 --  graphs <- Control.Monad.Random.evalRandIO singleString
@@ -177,6 +190,13 @@ checkArgs lgArgs = do
            else
                do
                  return errorOcurred
+  if s == (-1 )
+  then 
+      do
+      randSeed <- System.Random.getStdGen
+      print randSeed
+  else
+      return ()
   let ifPercentage = percentageIfs lgArgs
       srcPercentage = percentageSources lgArgs
       sinkPercentage = percentageSinks lgArgs
@@ -210,11 +230,11 @@ main = do
         -- Main execution branch
 
         -- Setup (seed, output file)
-        setSeed (seed lgArgs)
+        --setSeed (seed lgArgs)
         let outputFile = output lgArgs
 
         -- Execute benchmark
-        outputString <- Control.Monad.Random.evalRandIO (genExampleBenchmark lgArgs)
+        let outputString = genExampleBenchmark lgArgs
 
         outputString <- case preamble lgArgs of
                             Nothing -> return outputString
