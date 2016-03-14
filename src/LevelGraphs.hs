@@ -441,7 +441,7 @@ toMuseMonadCode graph = helperToMuseCode nodes ++ "\n"
 cgNodesToMuseApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToMuseApplicative graph [] = ""
 cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation,_))] = "(<$>" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
-cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_,_))] = "(" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_,_))] = "" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ""
 cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "  
                                 ++  (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
     where 
@@ -458,17 +458,17 @@ toMuseAppCode graph = helperToMuseApp nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToMuseApplicative graph [levelNode]
-      levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
+      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = "(return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = cgNodeToClojureFunction toMuseAppCode graph [] lastnode
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation,_))]] = "] (return " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
+      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_,_))]] = "] " ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode
       helperToMuseApp (lvl:lvls) = if (length lvls) == 0
                                    then (helperToMuseApp lvls)
-                                   else "(mlet [ " ++ (levelToDoApp lvl) ++ "] \n" ++ (helperToMuseApp lvls) ++ ")"
+                                   else (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls) ++ ""
 
 toMuseAppCodeWrapped :: String -> CodeGraph -> String
-toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " [] (run!! \n" ++ toMuseAppCode graph ++ "))\n"
+toMuseAppCodeWrapped testname graph = "(defn " ++ testname ++ " [] (run!! \n (mlet [ " ++ toMuseAppCode graph ++ ")))\n"
 
 
 -- assumes the level graph is connected!
@@ -489,25 +489,25 @@ toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(ohua\n" ++ toO
 
 cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToOhuaApplicative graph [] = ""
-cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
-cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,_))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation,_))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
+cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,_,_))] = "" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ""
 cgNodesToOhuaApplicative graph nodes = "(vector " ++ (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
     where
-      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation)) =
+      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation,_)) =
           "compute " ++ List.intercalate " " (map (\x -> nodeToUniqueNameClojure x ) children) ++ " " ++ show n
-      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation)) =  \x -> "(" ++ ((flip toReturnCompute node) x) ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,_)) = flip (cgNodeToClojureFunction toOhuaAppCode graph) node
+      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation,_)) =  \x -> "(" ++ ((flip toReturnCompute node) x) ++ ")"
+      toFun node@(_, CodeGraphNodeLabel (_,_,_)) = flip (cgNodeToClojureFunction toOhuaAppCode graph) node
 
 toOhuaAppCode :: CodeGraph -> String
 toOhuaAppCode graph = helperToOhuaApp nodes ++ "\n"
     where
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToOhuaApplicative graph [levelNode]
-      levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
+      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
       helperToOhuaApp [] = ""
-      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation))]] = cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
-      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,_))]] = cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation,_))]] = cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,_,_))]] = cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
       helperToOhuaApp (lvl:lvls) = if (length lvls) == 0
                                    then (helperToOhuaApp lvls)
                                    else "(let [ " ++ (levelToDoApp lvl) ++ "] \n" ++ (helperToOhuaApp lvls) ++ ")"
