@@ -194,7 +194,7 @@ checkArgs lgArgs = do
   then 
       do
       randSeed <- System.Random.getStdGen
-      print randSeed
+      print $ "No seed submitted. Running with random seed:" ++ show randSeed
   else
       return ()
   let ifPercentage = percentageIfs lgArgs
