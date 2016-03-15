@@ -175,9 +175,9 @@ ctWithProb ps =
         ps' = map toRational ps 
     in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation] (ps' ++ [1 - (sum ps')]) 
 
-condWithProb :: MonadRandom m => Double -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
-condWithProb p oldctx@(pre,node,CodeGraphNodeLabel (lvl,_,_),children) = 
-    if (length children > 3 || length children < 3) then return oldctx -- until we figure out a better way
+condWithProb :: MonadRandom m => Double -> Gr a () -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
+condWithProb p graph oldctx@(pre,node,CodeGraphNodeLabel (lvl,_,_),children) = 
+    if (length children > 3 || length children < 3 || (elem [] $ map (Graph.suc graph) (Graph.suc graph node) )) then return oldctx -- until we figure out a better way
     else newctx >>= (\x -> return [(x,p'), (oldctx,1-p') ]) >>= Control.Monad.Random.fromList 
          where p' = toRational p
                randomBranches :: MonadRandom m => m [Maybe Graph.Node]
@@ -238,7 +238,7 @@ makeCondCGWithProb p gr =
     where
       unfolded = Graph.ufold (:) [] gr
       makeCond ::  MonadRandom m => Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b) 
-      makeCond = \x@(_,node,_,_) -> if (null $ Graph.suc gr node) then return x else condWithProb p x
+      makeCond = \x@(_,node,_,_) -> if (null $ Graph.suc gr node) then return x else condWithProb p gr x
       transformed = flip Control.Monad.mapM unfolded $ makeCond
       
 
