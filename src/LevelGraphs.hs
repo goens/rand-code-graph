@@ -487,6 +487,31 @@ toMuseAppCodeWrapped testname graph = if (levelsCGraph graph == 1)
                                       else "(defn " ++ testname ++ " [] (run!! \n (mlet [ " ++ toMuseAppCode graph ++ ")))\n"
 
 
+cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
+cgNodesToOhuaApplicative graph [] = ""
+cgNodesToOhuaApplicative graph [node@(nd, _)] = "" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ""
+cgNodesToOhuaApplicative graph nodes = "(vector " ++ List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes) ++ ")"
+    where 
+      toFun node = flip (cgNodeToClojureFunction toOhuaAppCode graph) node
+
+toOhuaAppCode :: CodeGraph -> String
+toOhuaAppCode graph =  helperToOhuaApp nodes
+    where 
+      nodes = reverse $ cGraphLevelSort graph --bottom up
+      levels = length nodes
+      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToOhuaApplicative graph [levelNode]
+      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
+                                ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
+      helperToOhuaApp [] = ""
+      helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls) ++ ""
+
+toOhuaAppCodeWrapped :: String -> CodeGraph -> String
+toOhuaAppCodeWrapped testname graph = if (levelsCGraph graph == 1)
+                                      then "(defn " ++ testname ++ " [] (ohua \n" ++ toOhuaAppCode graph ++ "))\n"
+                                      else "(defn " ++ testname ++ " [] (ohua \n (let [ " ++ toOhuaAppCode graph ++ ")))\n"
+
+
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
 -- (otherwise there is no call in the end)
@@ -503,33 +528,6 @@ toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
 toOhuaCodeWrapped :: String -> CodeGraph -> String
 toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(ohua\n" ++ toOhuaCode graph ++ "))"
 
-cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
-cgNodesToOhuaApplicative _ [] = ""
-cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation,_))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
-cgNodesToOhuaApplicative graph [node@(nd, CodeGraphNodeLabel (_,_,_))] = "(" ++ (cgNodeToClojureFunction toOhuaAppCode graph (Graph.suc graph $ nd) node) ++ ")"
-cgNodesToOhuaApplicative graph nodes = "(vector " ++ (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
-    where
-      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation,_)) =
-          "compute " ++ List.intercalate " " (map (\x -> nodeToUniqueNameClojure x ) children) ++ " " ++ show n
-      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation,_)) =  \x -> "(" ++ ((flip toReturnCompute node) x) ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,_,_)) = flip (cgNodeToClojureFunction toOhuaAppCode graph) node
-
-toOhuaAppCode :: CodeGraph -> String
-toOhuaAppCode graph = helperToOhuaApp nodes ++ "\n"
-    where
-      nodes = reverse $ cGraphLevelSort graph --bottom up
-      levels = length nodes
-      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToOhuaApplicative graph [levelNode]
-      levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
-                                ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
-      helperToOhuaApp [] = ""
-      helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "] ") ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
-      helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls)
-
-toOhuaAppCodeWrapped :: String -> CodeGraph -> String
-toOhuaAppCodeWrapped testname graph = if (levelsCGraph graph == 1)
-                                      then "(defn " ++ testname ++ " []\n (ohua \n" ++ toOhuaAppCode graph ++ "))\n"
-                                      else "(defn " ++ testname ++ " []\n (ohua (let [ \n" ++ toOhuaAppCode graph ++ ")))\n"
 
 ------------------------------------------------------------
 -- Haskell Backend
