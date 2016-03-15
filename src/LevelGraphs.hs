@@ -416,7 +416,7 @@ cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,t
 cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
-    "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
+    "(if (check " ++ maybeNodeToSubgraph cond ++ ") " ++ List.intercalate " " (map maybeNodeToSubgraph [trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
                  maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
 
@@ -430,7 +430,7 @@ cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputatio
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureAppnFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
-    "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
+    "(conditional-code-not-supported-in-this-backend " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
                  maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
 
