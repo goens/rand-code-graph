@@ -420,6 +420,21 @@ cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond
            where maybeNodeToSubgraph CondNil = "nil"
                  maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
 
+cgNodeToClojureAppFunction :: (CodeGraph -> String) -> CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,DataSource,time)) = 
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
+cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SlowDataSource,time)) = 
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
+cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
+    "(<$> (compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ "(return " ++ (show $ fromMaybe n time) ++ ")))"
+cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+cgNodeToClojureAppnFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
+    "(if " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
+           where maybeNodeToSubgraph CondNil = "nil"
+                 maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node
+
+
 
 cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
@@ -443,15 +458,11 @@ toMuseMonadCode graph = helperToMuseCode nodes ++ "\n"
 
 cgNodesToMuseApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToMuseApplicative graph [] = ""
-cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,OtherComputation,_))] = "(<$>" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ")"
-cgNodesToMuseApplicative graph [node@(nd, CodeGraphNodeLabel (_,_,_))] = "" ++ (cgNodeToClojureFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ""
+cgNodesToMuseApplicative graph [node@(nd, _)] = "" ++ (cgNodeToClojureAppFunction toMuseAppCode graph (Graph.suc graph $ nd) node) ++ ""
 cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "  
                                 ++  (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
     where 
-      toReturnCompute children (n,CodeGraphNodeLabel (_,OtherComputation,_)) = 
-          "compute " ++ List.intercalate " " (map (\x -> "(return " ++ nodeToUniqueNameClojure x ++ ")" ) children) ++ " (return " ++ show n ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,OtherComputation,_)) =  \x -> "(<$> " ++ ((flip toReturnCompute node) x) ++ ")"
-      toFun node@(_, CodeGraphNodeLabel (_,_,_)) = flip (cgNodeToClojureFunction toMuseAppCode graph) node
+      toFun node = flip (cgNodeToClojureAppFunction toMuseAppCode graph) node
 
 
 
@@ -459,7 +470,7 @@ toMuseMonadCodeWrapped :: String -> CodeGraph -> String
 toMuseMonadCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
 
 toMuseAppCode :: CodeGraph -> String
-toMuseAppCode graph =  helperToMuseApp nodes ++ "\n"
+toMuseAppCode graph =  helperToMuseApp nodes
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levels = length nodes
@@ -467,8 +478,7 @@ toMuseAppCode graph =  helperToMuseApp nodes ++ "\n"
       levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation,_))]] = (if levels == 1 then "(<$>  " else "] (return ") ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode ++ ")"
-      helperToMuseApp [[lastnode@(_, CodeGraphNodeLabel (_,_,_))]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode
+      helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode
       helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls) ++ ""
 
 toMuseAppCodeWrapped :: String -> CodeGraph -> String
