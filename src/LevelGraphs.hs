@@ -426,7 +426,7 @@ cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,DataSource,time
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SlowDataSource,time)) = 
     "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
-    "(<$> (compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ "(return " ++ (show $ fromMaybe n time) ++ ")))"
+    "(<$> compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ "(return " ++ (show $ fromMaybe n time) ++ "))"
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureAppnFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
