@@ -426,7 +426,7 @@ cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,DataSource,time
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SlowDataSource,time)) = 
     "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
-    "(<$> compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ "(return " ++ (show $ fromMaybe n time) ++ "))"
+    "(<$> compute (return " ++ List.intercalate ") (return " (map nodeToUniqueNameClojure children) ++ (if length children == 0 then " " else ") (return ") ++ (show $ fromMaybe n time) ++ "))"
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureAppnFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
@@ -478,7 +478,7 @@ toMuseAppCode graph =  helperToMuseApp nodes
       levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
-      helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction toMuseAppCode graph [] lastnode
+      helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureAppFunction toMuseAppCode graph [] lastnode
       helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls) ++ ""
 
 toMuseAppCodeWrapped :: String -> CodeGraph -> String
@@ -523,8 +523,7 @@ toOhuaAppCode graph = helperToOhuaApp nodes ++ "\n"
       levelToDoApp levelNodes = "[" ++ List.intercalate ", " (map (nodeToUniqueNameClojure . fst) levelNodes)
                                 ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
       helperToOhuaApp [] = ""
-      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,OtherComputation,_))]] = (if levels == 1 then "" else "] ") ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
-      helperToOhuaApp [[lastnode@(_, CodeGraphNodeLabel (_,_,_))]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
+      helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "] ") ++ cgNodeToClojureFunction toOhuaAppCode graph [] lastnode
       helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls)
 
 toOhuaAppCodeWrapped :: String -> CodeGraph -> String
