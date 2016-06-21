@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DoAndIfThenElse #-}
 
--- | Code for generating random level-graphs, a sort of generalization of trees
+-- | Code for generating random level-graphs, a generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
 --   This is part of a project for efficient IO batching using
 --   Ohua (https://bitbucket.org/sertel/ohua), and compare it with Muse and Haxl.

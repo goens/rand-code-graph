@@ -59,9 +59,13 @@ import qualified Data.Tuple           as Tuple
 
 data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
 
+newtype Depth = Data Int deriving (Show, Eq, Ord) -- depth remaning (0 means can't spawn a function there)
+
 data ComputationType = DataSource | SideEffect | OtherComputation | 
+                       Function | Map |
                        Conditional CondBranch CondBranch CondBranch |
                        SlowDataSource deriving (Show, Eq) --conditional: condition true-branch false-branch
+
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
 type Level = Int
@@ -173,7 +177,7 @@ ctWithProb :: MonadRandom m => [Double] -> m ComputationType
 ctWithProb ps = 
     let
         ps' = map toRational ps 
-    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation] (ps' ++ [1 - (sum ps')]) 
+    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation, Function, Map] (ps' ++ [1 - (sum ps')]) 
 
 condWithProb :: MonadRandom m => Double -> Gr a () -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
 condWithProb p graph oldctx@(pre,node,CodeGraphNodeLabel (lvl,_,_),children) = 
@@ -415,6 +419,7 @@ cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,t
     "(compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+                   -- TODO add: function/map backends
 cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
     "(if (check " ++ maybeNodeToSubgraph cond ++ ") " ++ List.intercalate " " (map maybeNodeToSubgraph [trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
@@ -429,6 +434,7 @@ cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputatio
     "(<$> compute (return " ++ List.intercalate ") (return " (map nodeToUniqueNameClojure children) ++ (if length children == 0 then " " else ") (return ") ++ (show $ fromMaybe n time) ++ "))"
 cgNodeToClojureAppFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+                   -- TODO add: function/map backends
 cgNodeToClojureAppnFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
     "(conditional-code-not-supported-in-this-backend " ++ List.intercalate " " (map maybeNodeToSubgraph [cond,trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
@@ -549,6 +555,7 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,OtherComputation,time)
     "compute [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "writeData \"service-name\" [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children
+                   -- TODO add: function/map backends
 cgNodeToHaskellFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
     "if " ++ (maybeNodeToUniqueName cond) ++ " then " ++ (maybeNodeToUniqueName trueBranch) ++ " else " ++  (maybeNodeToUniqueName falseBranch)
            where maybeNodeToUniqueName CondNil = "nil"
