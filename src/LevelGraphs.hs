@@ -59,7 +59,7 @@ import qualified Data.Tuple           as Tuple
 
 data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
 
-newtype Depth = Data Int deriving (Show, Eq, Ord) -- depth remaning (0 means can't spawn a function there)
+newtype Depth = Depth Int deriving (Show, Eq, Ord) -- depth remaning (0 means can't spawn a function there)
 
 data ComputationType = DataSource | SideEffect | OtherComputation | 
                        Function | Map |
@@ -177,7 +177,7 @@ ctWithProb :: MonadRandom m => [Double] -> m ComputationType
 ctWithProb ps = 
     let
         ps' = map toRational ps 
-    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, OtherComputation, Function, Map] (ps' ++ [1 - (sum ps')]) 
+    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, Function, Map, OtherComputation] (ps' ++ [1 - (sum ps')])
 
 condWithProb :: MonadRandom m => Double -> Gr a () -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
 condWithProb p graph oldctx@(pre,node,CodeGraphNodeLabel (lvl,_,_),children) = 
@@ -419,8 +419,11 @@ cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,OtherComputation,t
     "(compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
-                   -- TODO add: function/map backends
-cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,Function,time)) =
+    "(fn-" ++ nodeToUniqueNameClojure n ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ (show $ fromMaybe n time) ++ ")"
+cgNodeToClojureFunction _ _ children (n,CodeGraphNodeLabel (_,Map,time)) =
+    "(map fn-" ++ nodeToUniqueNameClojure n ++ " [" ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ "] " ++ (show $ fromMaybe n time) ++ ")"
+cgNodeToClojureFunction toCode graph _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) =
     "(if (check " ++ maybeNodeToSubgraph cond ++ ") " ++ List.intercalate " " (map maybeNodeToSubgraph [trueBranch,falseBranch] ) ++ ")"
            where maybeNodeToSubgraph CondNil = "nil"
                  maybeNodeToSubgraph (CondBranch node) = toCode $ subGraphFrom graph node

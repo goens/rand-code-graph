@@ -73,6 +73,8 @@ genExampleBenchmark lgArgs = let
     lang = language lgArgs
     srcPercentage = percentageSources lgArgs
     sinkPercentage = percentageSinks lgArgs
+    funPercentage = percentageFuns lgArgs
+    mapPercentage = percentageMaps lgArgs
     ifPercentage = percentageIfs lgArgs
     slowDS = slowdatasource lgArgs
     cache = cachenum lgArgs
@@ -81,7 +83,7 @@ genExampleBenchmark lgArgs = let
     -- Derivated data structures
     lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..0]) [] [1..total]
     weightMap = exampleMapUpTo lvls
-    typeWeights = [srcPercentage,sinkPercentage]
+    typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
     toCodeWrapped = case lang of
                       "HaskellDo" -> toHaskellDoCodeWrapped
                       "HaskellDoApp" -> toHaskellDoAppCodeWrapped
@@ -122,8 +124,11 @@ data LGCmdArgs = LGCmdArgs {output :: String,
                             totalGraphs :: Int,
                             language :: String,
                             seed :: Int,
+                            maxDepth :: Int,
                             percentageSources :: Double,
                             percentageSinks :: Double,
+                            percentageFuns :: Double,
+                            percentageMaps :: Double,
                             percentageIfs :: Double,
                             slowdatasource :: Bool,
                             cachenum :: Maybe Int,
@@ -136,8 +141,11 @@ lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no ou
                        totalGraphs = 1 &= name "n" &= help "Total number of graphs to generate. Default is 1",
                        language = "Ohua" &= name "L" &= help "Language to outpt in. \"Graph\" for graphs. Default is Ohua.",
                        seed = (-1) &= name "s" &= help "Random seed for ensuring reproducibility (positive integer). Default is random.",
+                       maxDepth = (2) &= help "Maximum nesting depth for functions in generated graphs. Default is 2.",
                        percentageSources = 0.4 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sinks, and executes (implicit). Default is 0.4",
                        percentageSinks = 0 &= help "Percentage of nodes that shall be data sources. It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
+                       percentageFuns = 0 &= help "Percentage of nodes that shall be functions (with their own code graph). It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
+                       percentageMaps = 0 &= help "Percentage of nodes that shall be invocations of the higher-order function 'map' (or derivatives thereof). It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0",
                        percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0",
                        preamble = def &= name "p" &= help "Prepend some code to the generated code.",
                        cachenum = Nothing &= name "c" &= help "Make a results that are cachable. Will generate from c possible requests. If flag is not present, caching is off. In this case all requests are different.",
@@ -190,6 +198,14 @@ checkArgs lgArgs = do
            else
                do
                  return errorOcurred
+  let d = maxDepth lgArgs
+  errorOcurred <- if (d < 0) then
+               do
+                 print "Error: Negative (max) depth!"
+                 return True
+           else
+               do
+                 return errorOcurred
   if s == (-1 )
   then 
       do
@@ -200,7 +216,9 @@ checkArgs lgArgs = do
   let ifPercentage = percentageIfs lgArgs
       srcPercentage = percentageSources lgArgs
       sinkPercentage = percentageSinks lgArgs
-      totalPrecentages = sinkPercentage + srcPercentage
+      funPercentage = percentageFuns lgArgs
+      mapPercentage = percentageMaps lgArgs
+      totalPrecentages = sinkPercentage + srcPercentage + funPercentage + mapPercentage
       conditionPercentages = (srcPercentage < 0) || (srcPercentage > 1) ||
                              (sinkPercentage < 0) || (sinkPercentage > 1) ||
                              (ifPercentage < 0) || (ifPercentage > 1) ||
