@@ -35,6 +35,7 @@ module LevelGraphs (CodeGraph, LevelGraph, CodeSubGraphs, NestedCodeGraph,
                     makeCodeGraphTimed,
                     toCodeWrapped, makeCodeGraphRandomlyTimed,
                     makeNestedCodeGraphRandomlyTimed,
+                    nodeToUniqueName,
                     genRandomCodeGraph, setSeed, nullCodeGraph,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
@@ -426,48 +427,45 @@ makeNestedCodeGraphRandomlyTimed t (maingraph, subgraphs) = sequenceT ((makeCode
 -- Clojure Backends
 ------------------------------------------------------------
 
-nodeToUniqueNameClojure :: Graph.Node -> String
-nodeToUniqueNameClojure  =  (++) "local-" . show 
-
 cgNodeToClojureFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel (_,DataSource,time)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
 cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel (_,SlowDataSource,time)) = 
-    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
 cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
-    "(compute " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " " ++ (show $ fromMaybe n time) ++ ")"
+    "(compute " ++ List.intercalate " " (map nodeToUniqueName children) ++ " " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel (_,Function,time)) =
-    "(fn-" ++ nodeToUniqueNameClojure n ++ (if null children then [] else " ") ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ ")"
+    "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
 cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel (_,Map,time)) =
-    "(map fn-" ++ nodeToUniqueNameClojure n ++ " [" ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ "] " ++ ")"
+    "(map ifn" ++ nodeToUniqueName n ++ " [" ++ List.intercalate " " (map nodeToUniqueName children) ++ "] " ++ ")"
 cgNodeToClojureFunction graph _ (_,CodeGraphNodeLabel (_,Conditional (CondBranch cond) trueBranch falseBranch,_)) =
-    "(if " ++ nodeToUniqueNameClojure cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
+    "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
     where maybeNodeToUniqueName CondNil = "nil"
-          maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameHaskell node
+          maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
 
 cgNodeToClojureAppFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureAppFunction _ children (n,CodeGraphNodeLabel (_,DataSource,time)) = 
-    "(get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
+    "(get-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
 cgNodeToClojureAppFunction _ children (n,CodeGraphNodeLabel (_,SlowDataSource,time)) = 
-    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
+    "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
 cgNodeToClojureAppFunction _ children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
-    "(<$> compute (return " ++ List.intercalate ") (return " (map nodeToUniqueNameClojure children) ++ (if length children == 0 then " " else ") (return ") ++ (show $ fromMaybe n time) ++ "))"
+    "(<$> compute (return " ++ List.intercalate ") (return " (map nodeToUniqueName children) ++ (if length children == 0 then " " else ") (return ") ++ (show $ fromMaybe n time) ++ "))"
 cgNodeToClojureAppFunction _ children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
-    "(write-data " ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+    "(write-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
 cgNodeToClojureAppFunction _ children (n,CodeGraphNodeLabel (_,Function,time)) =
-    "(fn-" ++ nodeToUniqueNameClojure n ++ (if null children then [] else " ") ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ ")"
+    "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ List.intercalate " " (map nodeToUniqueName children) ++ ")"
 cgNodeToClojureAppFunction _ children (n,CodeGraphNodeLabel (_,Map,time)) =
-    "(map fn-" ++ nodeToUniqueNameClojure n ++ " [" ++ List.intercalate " " (map nodeToUniqueNameClojure children) ++ "] " ++ ")"
+    "(map ifn" ++ nodeToUniqueName n ++ " [" ++ List.intercalate " " (map nodeToUniqueName children) ++ "] " ++ ")"
 cgNodeToClojureAppFunction graph _ (_,CodeGraphNodeLabel (_,Conditional (CondBranch cond) trueBranch falseBranch,_)) = 
-    "(if " ++ nodeToUniqueNameClojure cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
+    "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
     where maybeNodeToUniqueName CondNil = "nil"
-          maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameHaskell node
+          maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
 
 
 cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ (cgNodeToClojureFunction graph (Graph.suc graph $ fst x) x))
+cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ (cgNodeToClojureFunction graph (Graph.suc graph $ fst x) x))
 
 
 toClojureSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, String)] -> String
@@ -484,7 +482,7 @@ toClojureSubFunction toCode (graph, name) =
 
 
 --cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
---cgNodeToClojureApplicative toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
+--cgNodeToClojureApplicative toCode graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -518,8 +516,8 @@ toMuseAppCode graph =  helperToMuseApp nodes
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levels = length nodes
-      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToMuseApplicative graph [levelNode]
-      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
+      levelToDoApp [levelNode] = (nodeToUniqueName . fst) levelNode ++ " " ++ cgNodesToMuseApplicative graph [levelNode]
+      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueName . fst) levelNodes)
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
       helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureAppFunction graph [] lastnode
@@ -545,8 +543,8 @@ toOhuaAppCode graph =  helperToOhuaApp nodes
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
       levels = length nodes
-      levelToDoApp [levelNode] = (nodeToUniqueNameClojure . fst) levelNode ++ " " ++ cgNodesToOhuaApplicative graph [levelNode]
-      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueNameClojure . fst) levelNodes)
+      levelToDoApp [levelNode] = (nodeToUniqueName . fst) levelNode ++ " " ++ cgNodesToOhuaApplicative graph [levelNode]
+      levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueName . fst) levelNodes)
                                 ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
       helperToOhuaApp [] = ""
       helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction graph [] lastnode
@@ -582,11 +580,11 @@ toOhuaCodeWrapped testname (graph, subgraphs) = toClojureSubFunctions toOhuaCode
 -- Haskell Backend
 ------------------------------------------------------------
 
-nodeToUniqueNameHaskell :: Graph.Node -> String
-nodeToUniqueNameHaskell  =  (++) "local" . show 
+nodeToUniqueName :: Graph.Node -> String
+nodeToUniqueName  =  (++) "local" . show 
 
 helperNodeToHaskellFunction :: [Graph.Node] -> String
-helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map nodeToUniqueNameHaskell children) 
+helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map nodeToUniqueName children) 
     where listStart = if null children then "" else ", "
 
 cgNodeToHaskellFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
@@ -597,19 +595,19 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SlowDataSource, time))
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
     "compute [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children ++ "]"
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,Function,time)) = 
-    "fun'" ++ nodeToUniqueNameHaskell n ++ " "  ++ List.intercalate " " (map nodeToUniqueNameHaskell children)
+    "ifn" ++ nodeToUniqueName n ++ " "  ++ List.intercalate " " (map nodeToUniqueName children)
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,Map,time)) = 
-    "map fun'" ++ nodeToUniqueNameHaskell n ++ " [" ++ (show $ fromMaybe n time) ++ helperNodeToHaskellFunction children ++ "]"
+    "map ifn" ++ nodeToUniqueName n ++ " [" ++ (show $ fromMaybe n time) ++ helperNodeToHaskellFunction children ++ "]"
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
     "writeData \"service-name\" [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children ++ "]"
 cgNodeToHaskellFunction _ (_,CodeGraphNodeLabel (_,Conditional cond trueBranch falseBranch,_)) = 
     "if " ++ (maybeNodeToUniqueName cond) ++ " then " ++ (maybeNodeToUniqueName trueBranch) ++ " else " ++  (maybeNodeToUniqueName falseBranch)
            where maybeNodeToUniqueName CondNil = "nil"
-                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueNameHaskell node
+                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
                  
 
 cgNodeToHaskellDoBind:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToHaskellDoBind graph = (\x -> (nodeToUniqueNameHaskell $ fst x) ++ " <- " ++ (cgNodeToHaskellFunction (Graph.suc graph $ fst x) x))
+cgNodeToHaskellDoBind graph = (\x -> (nodeToUniqueName $ fst x) ++ " <- " ++ (cgNodeToHaskellFunction (Graph.suc graph $ fst x) x))
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -626,7 +624,7 @@ toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
     where 
       nodes = reverse $ cGraphTopSort graph --bottom up
       trSpace = "  "
-      helperToHaskellDoCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueNameHaskell (fst $ last ns) ++ "\n"
+      helperToHaskellDoCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueName (fst $ last ns) ++ "\n"
 
 -- Here: add recursive call to generate functions in Function and Map nodes
 toHaskellDoCodeWrapped :: String -> NestedCodeGraph -> String
@@ -640,9 +638,9 @@ toHaskellDoAppCode :: CodeGraph -> String
 toHaskellDoAppCode graph = helperToDoApp nodes ++ "\n"
     where 
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToDoApp [levelNode] = (nodeToUniqueNameHaskell . fst) levelNode 
+      levelToDoApp [levelNode] = (nodeToUniqueName . fst) levelNode 
                                 ++ " <- " ++ cgNodesToHaxlApplicative graph [levelNode]
-      levelToDoApp levelNodes = "(" ++ List.intercalate ", " (map (nodeToUniqueNameHaskell . fst) levelNodes)
+      levelToDoApp levelNodes = "(" ++ List.intercalate ", " (map (nodeToUniqueName . fst) levelNodes)
                                 ++ ") <- " ++ cgNodesToHaxlApplicative graph levelNodes
       helperToDoApp [] = ""
       helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToHaxlApplicative graph [lastLvlNode] ++ "\n"

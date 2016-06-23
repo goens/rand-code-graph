@@ -60,6 +60,7 @@ executable random-level-graphs
   build-depends:       base,
                        level-graphs,
                        random,
+                       fgl >= 5.5.2,
                        cmdargs,
                        MonadRandom,
                        containers,
