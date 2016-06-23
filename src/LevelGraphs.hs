@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns  #-}
 {-# LANGUAGE FlexibleInstances #-}
-
+{-# LANGUAGE ScopedTypeVariables, ExplicitForAll #-}
 -- | Code for generating random level-graphs, a sort of generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
 --   This is part of a project for efficient IO batching using 
@@ -31,20 +31,21 @@
 --   Author: Andres Goens
 --   andres.goens@tu-dresden.de
 
-module LevelGraphs (CodeGraph, LevelGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped, toOhuaAppCodeWrapped,
-                    toMuseMonadCodeWrapped, toHaskellDoCode, toOhuaCode, toMuseMonadCode,
-                    toMuseAppCode, toMuseAppCodeWrapped,makeCodeGraphTimed,
-                    toHaskellDoAppCodeWrapped, toHaskellDoAppCode, makeCodeGraphRandomlyTimed,
-                    toGraphCodeWrapped, genRandomCodeGraph, setSeed, nullCodeGraph,
+module LevelGraphs (CodeGraph, LevelGraph, CodeSubGraphs, NestedCodeGraph,
+                    makeCodeGraphTimed,
+                    toCodeWrapped, makeCodeGraphRandomlyTimed,
+                    makeNestedCodeGraphRandomlyTimed,
+                    genRandomCodeGraph, setSeed, nullCodeGraph,
                     joinGraphRandom, joinLevelGraphRandom, joinLevelGraph, joinGraph,
                     graph2LevelGraph, makeCodeGraph, fullGraph, concatenateTests,
                     levelsLGraph, levelsCGraph, genRandomCodeGraphBigDS,
-                    nullGraph, nullLevelGraph, makeCondCGWithProb,
+                    nullGraph, nullLevelGraph, makeCondCGWithProb, cgGetSubFunctions, 
                     listTests) where
 
 import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
 import           Control.Monad.Random (MonadRandom,fromList, getRandomR)
 import           Data.Maybe           (fromMaybe)
+import           Data.Tuple.Sequence         
 
 import qualified System.Random        (mkStdGen, setStdGen)
 
@@ -75,6 +76,8 @@ newtype CodeGraphNodeLabel = CodeGraphNodeLabel (Level,ComputationType, Maybe In
 type LevelGraph = Data.Graph.Inductive.Gr Level () -- There can only be edges (a,b) if level a < level b
 type CodeGraph = Gr CodeGraphNodeLabel ()
 
+type CodeSubGraphs = [(CodeGraph, String)]
+type NestedCodeGraph = (CodeGraph, CodeSubGraphs) 
 
 instance Ord CodeGraphNodeLabel where
     (<=) (CodeGraphNodeLabel (lvl,_,_)) (CodeGraphNodeLabel (lvl',_,_)) = lvl <= lvl'
@@ -137,7 +140,18 @@ subGraphFrom graph start = Graph.subgraph sucnodes graph
       getSucs [] = []
       getSucs nodes =  nodes ++ getSucs (concat $ map sucfn nodes)
       sucnodes = getSucs [start]
-                     
+
+cgGetSubFunctions :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
+cgGetSubFunctions graph = Graph.labNodes $ Graph.labnfilter isFunctionNode graph 
+    where
+      isFunctionNode :: Graph.LNode CodeGraphNodeLabel -> Bool
+      isFunctionNode (_,CodeGraphNodeLabel (_,Function,_)) = True
+      isFunctionNode (_,CodeGraphNodeLabel (_,Map,_)) = True
+      isFunctionNode _ = False
+                         
+graphGetLeaves ::  Gr a b -> [Graph.LNode a]
+graphGetLeaves gr = Graph.labNodes $ Graph.nfilter (null . Graph.suc gr) gr
+
 
 ------------------------------------------------------------
 -- Random-monad helper functions
@@ -398,6 +412,11 @@ makeCodeGraphRandomlyTimed n gr = liftM Graph.buildGr transformed
       transformed = flip Control.Monad.mapM unfolded $ \ctx -> do newn <- getRandomR (1,n)
                                                                   return $ (\(pre,node,label,after) -> (pre,node, makeCGNodeTimed newn label, after)) ctx
 
+
+makeNestedCodeGraphRandomlyTimed :: forall m . MonadRandom m => Int -> NestedCodeGraph  -> m NestedCodeGraph
+makeNestedCodeGraphRandomlyTimed t (maingraph, subgraphs) = sequenceT ((makeCodeGraphRandomlyTimed t maingraph , mapM makeSubgraphRandomlyTimed subgraphs) :: (m CodeGraph, m CodeSubGraphs))
+    where makeSubgraphRandomlyTimed :: (CodeGraph, String) -> m (CodeGraph, String)
+          makeSubgraphRandomlyTimed = (\(x,y) -> sequenceT ((makeCodeGraphRandomlyTimed t x, return y) :: (m CodeGraph, m String)))
 -- nmapM :: (Graph.DynGraph gr, MonadRandom m) => (a -> m c) -> gr a b -> m (gr c b)
 -- nmapM f = gmapM (\(p,v,l,s)->(p,v,f l,s))
 --     where 
@@ -450,6 +469,20 @@ cgNodeToClojureAppFunction graph _ (_,CodeGraphNodeLabel (_,Conditional (CondBra
 cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ (cgNodeToClojureFunction graph (Graph.suc graph $ fst x) x))
 
+
+toClojureSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, String)] -> String
+toClojureSubFunctions _ [] = ""
+toClojureSubFunctions toCode subgraphs = List.intercalate "\n" (map (toClojureSubFunction toCode) subgraphs)
+
+toClojureSubFunction :: (CodeGraph -> String) -> (CodeGraph, String) -> String
+toClojureSubFunction toCode (graph, name) = 
+    let 
+        leaves = graphGetLeaves graph
+        numLeaves = length leaves
+        parameterNames = map (\x -> "parameter-" ++ show x) [1..]
+    in "(defn " ++ name ++ " [ " ++ (concat $ take numLeaves parameterNames) ++ "]" ++ "(\n" ++ toCode graph ++ "\n))"
+
+
 --cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 --cgNodeToClojureApplicative toCode graph = (\x -> (nodeToUniqueNameClojure $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
 
@@ -476,9 +509,9 @@ cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "
       toFun node = flip (cgNodeToClojureAppFunction graph) node
 
 
-
-toMuseMonadCodeWrapped :: String -> CodeGraph -> String
-toMuseMonadCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
+toMuseMonadCodeWrapped :: String -> NestedCodeGraph -> String
+toMuseMonadCodeWrapped testname (graph, subgraphs) = (toClojureSubFunctions toMuseMonadCode subgraphs)
+                                                     ++ "(defn " ++ testname ++ " []\n(run!! \n" ++ toMuseMonadCode graph ++ "))"
 
 toMuseAppCode :: CodeGraph -> String
 toMuseAppCode graph =  helperToMuseApp nodes
@@ -492,11 +525,13 @@ toMuseAppCode graph =  helperToMuseApp nodes
       helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureAppFunction graph [] lastnode
       helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls) ++ ""
 
-toMuseAppCodeWrapped :: String -> CodeGraph -> String
-toMuseAppCodeWrapped testname graph = if (levelsCGraph graph == 1)
-                                      then "(defn " ++ testname ++ " [] (run!! \n" ++ toMuseAppCode graph ++ "))\n"
-                                      else "(defn " ++ testname ++ " [] (run!! \n (mlet [ " ++ toMuseAppCode graph ++ ")))\n"
-
+toMuseAppCodeWrapped :: String -> NestedCodeGraph -> String
+toMuseAppCodeWrapped testname (graph, subgraphs) = 
+    let maingraph = if (levelsCGraph graph == 1)
+                    then "(defn " ++ testname ++ " [] (run!! \n" ++ toMuseAppCode graph ++ "))\n"
+                    else "(defn " ++ testname ++ " [] (run!! \n (mlet [ " ++ toMuseAppCode graph ++ ")))\n"
+        subs = toClojureSubFunctions toMuseAppCode subgraphs
+    in subs ++ "\n" ++ maingraph
 
 cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToOhuaApplicative graph [] = ""
@@ -517,11 +552,13 @@ toOhuaAppCode graph =  helperToOhuaApp nodes
       helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction graph [] lastnode
       helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls) ++ ""
 
-toOhuaAppCodeWrapped :: String -> CodeGraph -> String
-toOhuaAppCodeWrapped testname graph = if (levelsCGraph graph == 1)
-                                      then "(defn " ++ testname ++ " [] (ohua \n" ++ toOhuaAppCode graph ++ "))\n"
-                                      else "(defn " ++ testname ++ " [] (ohua \n (let [ " ++ toOhuaAppCode graph ++ ")))\n"
-
+toOhuaAppCodeWrapped :: String -> NestedCodeGraph -> String
+toOhuaAppCodeWrapped testname (graph, subgraphs) = 
+    let maingraph = if (levelsCGraph graph == 1)
+                    then "(defn " ++ testname ++ " [] (ohua \n" ++ toOhuaAppCode graph ++ "))\n"
+                    else "(defn " ++ testname ++ " [] (ohua \n (let [ " ++ toOhuaAppCode graph ++ ")))\n"
+        subs = toClojureSubFunctions toOhuaAppCode subgraphs
+    in subs ++ "\n" ++ maingraph
 
 -- assumes the level graph is connected!
 -- assumes the lowest level has exactly one element!
@@ -536,8 +573,9 @@ toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
       helperToOhuaCode [[lastLvlNode]] = cgNodeToClojureFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
       helperToOhuaCode (lvl:lvls) = "(" ++ (levelToOhua lvl) ++ "\n" ++ (helperToOhuaCode lvls) ++ ")"
 
-toOhuaCodeWrapped :: String -> CodeGraph -> String
-toOhuaCodeWrapped testname graph = "(defn " ++ testname ++ " []\n(ohua\n" ++ toOhuaCode graph ++ "))"
+toOhuaCodeWrapped :: String -> NestedCodeGraph -> String
+toOhuaCodeWrapped testname (graph, subgraphs) = toClojureSubFunctions toOhuaCode subgraphs
+                                   ++ "\n" ++ "(defn " ++ testname ++ " []\n(ohua\n" ++ toOhuaCode graph ++ "))"
 
 
 ------------------------------------------------------------
@@ -559,7 +597,7 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SlowDataSource, time))
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,OtherComputation,time)) = 
     "compute [" ++ (show $ fromMaybe n time) ++  helperNodeToHaskellFunction children ++ "]"
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,Function,time)) = 
-    "fun'" ++ nodeToUniqueNameHaskell n ++ " " ++ List.intercalate " " (map nodeToUniqueNameHaskell children)
+    "fun'" ++ nodeToUniqueNameHaskell n ++ " "  ++ List.intercalate " " (map nodeToUniqueNameHaskell children)
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,Map,time)) = 
     "map fun'" ++ nodeToUniqueNameHaskell n ++ " [" ++ (show $ fromMaybe n time) ++ helperNodeToHaskellFunction children ++ "]"
 cgNodeToHaskellFunction children (n,CodeGraphNodeLabel (_,SideEffect,time)) = 
@@ -590,12 +628,13 @@ toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
       trSpace = "  "
       helperToHaskellDoCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueNameHaskell (fst $ last ns) ++ "\n"
 
-toHaskellDoCodeWrapped :: String -> CodeGraph -> String
-toHaskellDoCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
-                                      testname ++ " myEnv =\n" ++
-                                      "    runHaxl myEnv $ do\n" ++
-                                      toHaskellDoCode graph ++ "\n"
-
+-- Here: add recursive call to generate functions in Function and Map nodes
+toHaskellDoCodeWrapped :: String -> NestedCodeGraph -> String
+toHaskellDoCodeWrapped testname (graph, subgraphs) = testname ++ " :: Env u -> IO Int\n" ++
+                                                     testname ++ " myEnv =\n" ++
+                                                     "    runHaxl myEnv $ do\n" ++
+                                                     toHaskellDoCode graph ++ "\n"
+-- implement haskell subgraphs
 
 toHaskellDoAppCode :: CodeGraph -> String
 toHaskellDoAppCode graph = helperToDoApp nodes ++ "\n"
@@ -609,11 +648,13 @@ toHaskellDoAppCode graph = helperToDoApp nodes ++ "\n"
       helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToHaxlApplicative graph [lastLvlNode] ++ "\n"
       helperToDoApp (lvl:lvls) = "        " ++ (levelToDoApp lvl) ++ "\n" ++ (helperToDoApp lvls)
 
-toHaskellDoAppCodeWrapped :: String -> CodeGraph -> String
-toHaskellDoAppCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" ++
-                                      testname ++ " myEnv =\n" ++
-                                      "    runHaxl myEnv $ do\n" ++
-                                      toHaskellDoAppCode graph ++ "\n"
+-- Here: add recursive call to generate functions in Function and Map nodes
+toHaskellDoAppCodeWrapped :: String -> NestedCodeGraph -> String
+toHaskellDoAppCodeWrapped testname (graph, subgraphs) = 
+    testname ++ " :: Env u -> IO Int\n" ++
+    testname ++ " myEnv =\n" ++ "    runHaxl myEnv $ do\n" ++
+    toHaskellDoAppCode graph ++ "\n"
+
 
 
 
@@ -621,8 +662,27 @@ toHaskellDoAppCodeWrapped testname graph = testname ++ " :: Env u -> IO Int\n" +
 -- Graph Backend
 ------------------------------------------------------------
 
-toGraphCodeWrapped :: String -> CodeGraph -> String
-toGraphCodeWrapped name graph = "Graph-" ++ name ++ "\n" ++ Graph.prettify graph ++ "\n"
+toGraphCodeWrapped :: String -> NestedCodeGraph -> String
+toGraphCodeWrapped name (graph, subgraphs) = 
+    "Graph-" ++ name ++ "\n" ++ Graph.prettify graph ++ "\n" ++
+    (concat $ flip map subgraphs (\(subgraph,_) -> "Subgraph-" ++ name ++ "\n" ++ Graph.prettify subgraph ++ "\n"))
+           
+------------------------------------------------------------
+-- General Backend
+------------------------------------------------------------
+
+-- Improve: replace "string" with a good language type
+toCodeWrapped :: String -> String -> NestedCodeGraph -> String
+toCodeWrapped lang =
+    case lang of
+      "HaskellDo" -> toHaskellDoCodeWrapped
+      "HaskellDoApp" -> toHaskellDoAppCodeWrapped
+      "Ohua" ->  toOhuaCodeWrapped
+      "OhuaApp" ->  toOhuaAppCodeWrapped
+      "Graph" -> toGraphCodeWrapped
+      "MuseMonad" -> toMuseMonadCodeWrapped
+      "MuseApp" -> toMuseAppCodeWrapped
+      _ -> (\_ _ -> "Unexpected language case error")
 
 ------------------------------------------------------------
 -- Simple Examples
@@ -642,32 +702,42 @@ randomExample :: MonadRandom m => m LevelGraph
 randomExample = joinLevelGraphRandom exampleMap (nullLevelGraph 1 2) (nullLevelGraph 2 3) 
 
 randomCodeGraphExample :: MonadRandom m => m CodeGraph
-randomCodeGraphExample = genRandomCodeGraph exampleMap [0.4,0.1] [2,2,3]
+randomCodeGraphExample = genRandomCodeGraph exampleMap [0.4,0.1, 0.2, 0.2] [2,2,3]
 
 randomCodeGraphExampleVarLength :: MonadRandom m => Int -> m CodeGraph
 randomCodeGraphExampleVarLength n = (sequence $ replicate n (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraph exampleMap [0.4,0.1]
 
-someExampleStrings :: MonadRandom m => m String
-someExampleStrings = liftM (concatenateTests toOhuaCodeWrapped ) $ sequence (List.replicate 10 randomCodeGraphExample)
+-- Fixme: get examples up there working again
 
-someExampleStringsVarLength :: MonadRandom m => m String
-someExampleStringsVarLength = liftM (concatenateTests toOhuaCodeWrapped) $ sequence (map randomCodeGraphExampleVarLength [1..20])
+someExampleStrings :: forall m. MonadRandom m => m String
+someExampleStrings = 
+    let 
+        emptyMonadList :: m CodeSubGraphs
+        emptyMonadList = return []
+        --randomEx :: m NestedCodeGraph
+        randomEx = sequenceT (randomCodeGraphExample :: m CodeGraph, emptyMonadList)
+    in liftM (concatenateTests toOhuaCodeWrapped ) $ sequence (List.replicate 10 randomEx )
+
+--someExampleStringsVarLength :: MonadRandom m => m String
+--someExampleStringsVarLength = liftM (concatenateTests toOhuaCodeWrapped) $ sequence (map (\(x,_) -> (randomCodeGraphExampleVarLength x, []) [1..20]))
+
 
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
-concatenateTests ::  (String -> CodeGraph -> String) -> [ CodeGraph ] -> String
+concatenateTests ::  (String -> NestedCodeGraph -> String) -> [ NestedCodeGraph ] -> String
 concatenateTests toCodeWrapped randomGraphs = singleString
     where
       randomGraphsNumbered = zip [0..] randomGraphs
-      totallevels = maximum $ map levelsCGraph randomGraphs 
-      strings = map (\(x,y) -> toCodeWrapped ("run_test_level" ++ (show $ levelsCGraph y) ++ "_" ++ show (x `quot` totallevels)) y) randomGraphsNumbered
+      totallevels = maximum $ map (levelsCGraph . fst) randomGraphs 
+      strings = map (\(x,y) -> toCodeWrapped ("run_test_level" ++ (show $ levelsCGraph $ fst y) ++ "_" ++ show (x `quot` totallevels)) y) randomGraphsNumbered
       singleString = List.intercalate "\n" strings
 
 
-listTests ::  [ CodeGraph ] -> String
-listTests randomGraphs = singleString
+listTests ::  [ NestedCodeGraph ] -> String
+listTests randomGraphsTup = singleString
     where
+      randomGraphs = map fst randomGraphsTup
       randomGraphsNumbered = zip [0..] randomGraphs
       totallevels = maximum $ map levelsCGraph randomGraphs 
       makeNameString (x,y) = "(run_test_level" ++ curLvlStr ++ "_" ++ curInstanceStr ++ ", " ++ curLvlStr ++ ", " ++ curInstanceStr ++ ")"
@@ -698,3 +768,4 @@ listTests randomGraphs = singleString
 --     the way the probabilities are currently done
 
 
+ 

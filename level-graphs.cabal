@@ -51,7 +51,8 @@ library
                        MonadRandom,
                        random,
                        fgl >= 5.5.2,
-                       containers
+                       containers,
+                       tuple
   hs-source-dirs:      src
   default-language:    Haskell98
 
@@ -61,7 +62,8 @@ executable random-level-graphs
                        random,
                        cmdargs,
                        MonadRandom,
-                       containers
+                       containers,
+                       tuple
   hs-source-dirs:      app
   main-is:             Main.hs
   default-language:    Haskell98

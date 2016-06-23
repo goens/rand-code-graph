@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DoAndIfThenElse #-}
+{-# LANGUAGE ScopedTypeVariables, ExplicitForAll #-}
 
 -- | Code for generating random level-graphs, a generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
@@ -32,15 +33,16 @@
 --   andres.goens@tu-dresden.de
 
 --import Debug.Trace (trace)
-import           LevelGraphs (CodeGraph, toHaskellDoCodeWrapped, toOhuaCodeWrapped, toOhuaAppCodeWrapped,
-                              toGraphCodeWrapped, toMuseAppCodeWrapped, makeCodeGraphRandomlyTimed,
-                              toMuseMonadCodeWrapped, toHaskellDoAppCodeWrapped,
-                              makeCondCGWithProb, concatenateTests, listTests, genRandomCodeGraph,
-                              genRandomCodeGraphBigDS)
+import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph,
+                              toCodeWrapped, makeCodeGraphRandomlyTimed,
+                              makeNestedCodeGraphRandomlyTimed,
+                              makeCondCGWithProb, concatenateTests, listTests,
+                              genRandomCodeGraph, genRandomCodeGraphBigDS)
 import           Control.Monad.Random (runRand, evalRand)
 import qualified System.Random (mkStdGen, getStdGen, StdGen)
 import           Data.Traversable (mapAccumL)
 import           Data.Tuple (swap)
+import           Data.Tuple.Sequence         
 import           System.Console.CmdArgs
 import           Control.Arrow (first)
 import           Data.Maybe (fromMaybe,fromJust,isJust)
@@ -54,14 +56,25 @@ import qualified Data.Map.Strict                                             as 
 exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
 
-randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m CodeGraph
+randomExampleBenchmark :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 --randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
-randomExampleBenchmark weightMap typeWeights ifPercentage len = let lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) 
-                                                                    --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
-                                                                    in lvllist >>= genRandomCodeGraph weightMap typeWeights >>= makeCondCGWithProb ifPercentage
+randomExampleBenchmark weightMap typeWeights ifPercentage len = 
+    let
+        lvllist ::  m [Int]
+        lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) 
+        --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
+        mainGraph = lvllist >>= genRandomCodeGraph weightMap typeWeights >>= makeCondCGWithProb ifPercentage
+        subGraphs = return [] :: m CodeSubGraphs -- TODO: generate subgraphs (recursively!)
+    in sequenceT (mainGraph, subGraphs) 
 
-randomExampleBenchmarkBDS :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m CodeGraph
-randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) >>= genRandomCodeGraphBigDS weightMap typeWeights >>= makeCondCGWithProb ifPercentage
+randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
+randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len =
+    let 
+        lvllist :: m [Int]
+        lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
+        mainGraph = lvllist >>= genRandomCodeGraphBigDS weightMap typeWeights >>= makeCondCGWithProb ifPercentage
+        subGraphs = return [] :: m CodeSubGraphs -- TODO: generate subgraphs (recursively!)
+    in sequenceT (mainGraph, subGraphs)
 
 
 genExampleBenchmark :: LGCmdArgs -> String
@@ -84,31 +97,28 @@ genExampleBenchmark lgArgs = let
     lvllist = take total $ foldl (\x _ -> x ++ [lvls,(lvls-1)..0]) [] [1..total]
     weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
-    toCodeWrapped = case lang of
-                      "HaskellDo" -> toHaskellDoCodeWrapped
-                      "HaskellDoApp" -> toHaskellDoAppCodeWrapped
-                      "Ohua" ->  toOhuaCodeWrapped
-                      "OhuaApp" ->  toOhuaAppCodeWrapped
-                      "Graph" -> toGraphCodeWrapped
-                      "MuseMonad" -> toMuseMonadCodeWrapped
-                      "MuseApp" -> toMuseAppCodeWrapped
-                      _ -> (\_ _ -> "Unexpected language case error")
-    randomBenchmark' = if slowDS then randomExampleBenchmarkBDS weightMap typeWeights ifPercentage else randomExampleBenchmark weightMap typeWeights ifPercentage
-    randomBenchmark :: System.Random.StdGen -> Int -> (CodeGraph, System.Random.StdGen)
+    randomBenchmark' :: MonadRandom m => Int -> m NestedCodeGraph
+    randomBenchmark' = 
+        (\lvl -> (if slowDS 
+                   then randomExampleBenchmarkBDS weightMap typeWeights ifPercentage lvl 
+                   else randomExampleBenchmark weightMap typeWeights ifPercentage lvl)
+        )
+
+    randomBenchmark :: System.Random.StdGen -> Int -> (NestedCodeGraph, System.Random.StdGen)
     randomBenchmark gen = 
         if
             isJust cache 
         then 
-            (\lvl ->  Control.Arrow.first (\x -> flip evalRand gen $ makeCodeGraphRandomlyTimed (fromJust cache) x) $  -- first f '=' (f,id)
+            (\lvl ->  Control.Arrow.first (\x -> flip evalRand gen $ makeNestedCodeGraphRandomlyTimed (fromJust cache) x) $  -- first f '=' (f,id)
                       runRand (randomBenchmark' lvl) gen 
             )
         else
             (\lvl -> runRand (randomBenchmark' lvl) gen)
     concatenateFun = case lang of
                        "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
-                       "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
+                       "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y) -- The same as HaskellDo
                        _ -> concatenateTests
-    in concatenateFun toCodeWrapped $ snd $ mapAccumL (\x y -> swap $ randomBenchmark x y) stdGen lvllist
+    in concatenateFun (toCodeWrapped lang) $ snd $ mapAccumL (\x y -> swap $ randomBenchmark x y) stdGen lvllist
 
 
 --  graphs <- Control.Monad.Random.evalRandIO singleString
