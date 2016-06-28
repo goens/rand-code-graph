@@ -59,8 +59,12 @@ import qualified Data.Map.Strict                                             as 
 exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
 
+zipMon :: Monad m => m [a] -> [b] -> m [(a,b)] -- there is probably a std lib function for this
+zipMon as bs = do
+  as' <- as
+  return (zip as' bs)
                    
-generateSubGraphs :: MonadRandom m => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
+generateSubGraphs :: forall m. MonadRandom m => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
 generateSubGraphs generatingFunction remainingDepth graph = 
 -- I probably will run into a name clash here. Either give them different unique names or find a way to nest the contexts in the backend
     let
@@ -69,15 +73,26 @@ generateSubGraphs generatingFunction remainingDepth graph =
         names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes :: [String] 
         mkSubgraph = \lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]
         mkSubgraphNoDepth = \lnode -> generatingFunction []  -- this should yield no further iterations
+        currentSubgraphs :: m [CodeGraph]
         currentSubgraphs = 
             if (remainingDepth <= 0) 
             then  mapM mkSubgraphNoDepth subnodes
             else  mapM mkSubgraph subnodes
-        subgraphsFull = zip currentSubgraphs names
-    in subgraphsFull ++ 
-       if (remainingDepth <= 0)
-       then []
-       else concat . sequence $ (generateSubGraphs generatingFunction nodeToUniqueName (remainingDepth - 1)) currentSubgraphs
+        subgraphsFull = zipMon currentSubgraphs names 
+        rest = 
+            if (remainingDepth <= 0)
+            then (return [] :: m CodeSubGraphs)
+            else 
+                let
+                    continueGenerating :: CodeGraph -> m CodeSubGraphs
+                    continueGenerating = (\g -> generateSubGraphs generatingFunction (remainingDepth - 1) g)
+                in 
+                  do 
+                    gs <- currentSubgraphs -- :: [CodeGraph]
+                    listOfSubGraphs <-  sequence $ (map continueGenerating gs :: [ m CodeSubGraphs])
+                    let oneSubGraphs = concat listOfSubGraphs
+                    return oneSubGraphs :: m CodeSubGraphs
+    in liftM2 (++) subgraphsFull rest
 
 randomExampleBenchmark :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 --randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
@@ -86,9 +101,10 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len =
         lvllist ::  m [Int]
         lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ])) 
         --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
-        generatingFunction = \llist -> llist >>= genRandomCodeGraph weightMap typeWeights >>= makeCondCGWithProb ifPercentage
-        mainGraph = generatingFunction lvllist 
-        subGraphs = generateSubGraphs generatingFunction 2 mainGraph -- TODO: make depth not hard-coded! 
+        generatingFunction :: [Int] -> m CodeGraph 
+        generatingFunction = \llist -> (genRandomCodeGraph weightMap typeWeights llist) >>= makeCondCGWithProb ifPercentage
+        mainGraph = lvllist >>= generatingFunction 
+        subGraphs = mainGraph >>= (generateSubGraphs generatingFunction 2) -- TODO: make depth not hard-coded! 
     in sequenceT (mainGraph, subGraphs) 
 
 randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
