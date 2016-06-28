@@ -47,22 +47,51 @@ cgNodeToClojureAppFunction graph _ (_,CodeGraphNodeLabel (_,Conditional (CondBra
           maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
 
 
+-- cgNodeToClojureSubFunction :: CodeGraph -> [Graph.Node] -> [String] -> Graph.LNode CodeGraphNodeLabel -> String
+-- cgNodeToClojureSubFunction _ children names (n,CodeGraphNodeLabel (_,DataSource,time)) =
+--     "(get-data " ++ List.intercalate " " (map nodeToUniqueName children) ++ " \"service-name\" " ++ (show $ fromMaybe n time)  ++ ")"
+-- cgNodeToClojureSubFunction _ children names (n,CodeGraphNodeLabel (_,SlowDataSource,time)) =
+--     "(slow-get-data " ++ List.intercalate " " (map nodeToUniqueName children names) ++ " \"service-name\" " ++ (show $ 10000 + fromMaybe n time)  ++ ")"
+-- cgNodeToClojureSubFunction _ children names (n,CodeGraphNodeLabel (_,OtherComputation,time)) =
+--     "(compute " ++ List.intercalate " " (map nodeToUniqueName children names) ++ " " ++ (show $ fromMaybe n time) ++ ")"
+-- cgNodeToClojureSubFunction _ children names (n,CodeGraphNodeLabel (_,SideEffect,time)) =
+--     "(write-data " ++ List.intercalate " " (map nodeToUniqueName children names) ++ " \"service-name\" " ++ (show $ fromMaybe n time) ++ ")"
+-- cgNodeToClojureSubFunction _ children names (n,CodeGraphNodeLabel (_,Function,time)) =
+--     "(ifn" ++ nodeToUniqueName n ++ (if null children names then [] else " ") ++ List.intercalate " " (map nodeToUniqueName children names) ++ ")"
+-- cgNodeToClojureSubFunction _ children names (n,CodeGraphNodeLabel (_,Map,time)) =
+--     "(map ifn" ++ nodeToUniqueName n ++ " [" ++ List.intercalate " " (map nodeToUniqueName children names) ++ "] " ++ ")"
+-- cgNodeToClojureSubFunction graph _ names (_,CodeGraphNodeLabel (_,Conditional (CondBranch cond) trueBranch falseBranch,_)) =
+--     "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
+--     where maybeNodeToUniqueName CondNil = "nil"
+--           maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+
+
 cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureLetDef toCode graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ (cgNodeToClojureFunction graph (Graph.suc graph $ fst x) x))
 
 
 toClojureSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, String)] -> String
 toClojureSubFunctions _ [] = ""
-toClojureSubFunctions toCode subgraphs = List.intercalate "\n" (map (toClojureSubFunction toCode) subgraphs)
-
+toClojureSubFunctions toCode subgraphs = List.intercalate "\n" (map (toClojureSubFunction toCode) $ reverse subgraphs)
+                                         
 toClojureSubFunction :: (CodeGraph -> String) -> (CodeGraph, String) -> String
 toClojureSubFunction toCode (graph, name) =
     let
         leaves = graphGetLeaves graph
         numLeaves = length leaves
-        parameterNames = map (\x -> "parameter-" ++ show x) [1..]
-    in "(defn " ++ name ++ " [ " ++ (concat $ take numLeaves parameterNames) ++ "]" ++ "(\n" ++ toCode graph ++ "\n))"
+        (head, graphrest) = toClojureSubFunctionWrapper graph numLeaves
+    in "(" ++ head ++ toCode graphrest ++ ")"
 
+toClojureSubFunctionWrapper :: CodeGraph -> Int -> (String, CodeGraph)
+toClojureSubFunctionWrapper graph numLeaves = 
+    let 
+        parameterNames' =  map (\x -> "parameter-" ++ show x) [1..] 
+        parameterNames = List.intercalate " " $ take numLeaves parameterNames'
+        -- head = "defn " ++ name ++ " [ " ++ parameterNames ++ "]" ++ "(\n" ++ toCode graph ++ "\n))"
+        head = "" -- TODO: fix this 
+        firstLine = "" -- TODO: fix this 
+        restGraph = graph -- TODO: fix this 
+    in ( head ++ firstLine, restGraph)
 
 --cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 --cgNodeToClojureApplicative toCode graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
