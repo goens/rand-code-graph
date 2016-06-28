@@ -47,6 +47,11 @@ cabal-version:       >=1.10
 
 library
   exposed-modules: LevelGraphs
+                 , Backend
+  other-modules:   Backends.Ohua
+                 , Backends.Haskell
+                 , Backends.Clojure
+                 , Backends.Muse
   build-depends:       base,
                        MonadRandom,
                        random,

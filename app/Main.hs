@@ -34,11 +34,12 @@
 
 --import Debug.Trace (trace)
 import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph,
-                              toCodeWrapped, makeCodeGraphRandomlyTimed,
+                              makeCodeGraphRandomlyTimed,
                               makeNestedCodeGraphRandomlyTimed, 
                               nodeToUniqueName, cgGetSubFunctions,
                               makeCondCGWithProb, concatenateTests, listTests,
                               genRandomCodeGraph, genRandomCodeGraphBigDS)
+import           Backend (toCodeWrapped)
 import           Control.Monad.Random (runRand, evalRand)
 import           Control.Monad
 import qualified System.Random (mkStdGen, getStdGen, StdGen)
