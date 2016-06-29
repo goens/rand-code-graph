@@ -52,7 +52,7 @@ data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
 newtype Depth = Depth Int deriving (Show, Eq, Ord) -- depth remaning (0 means can't spawn a function there)
 
 data ComputationType = DataSource | SideEffect | OtherComputation | 
-                       Function | Map |
+                       Function | Map | NamedFunction String |
                        Conditional CondBranch CondBranch CondBranch |
                        SlowDataSource deriving (Show, Eq) --conditional: condition true-branch false-branch
 
@@ -89,11 +89,17 @@ intMap f gr = Graph.buildGr $ List.map (intMapNode f) $ Graph.ufold (:) [] gr
 minLevel :: LevelGraph -> Level
 minLevel = minimum . (map snd) . Graph.labNodes
 
+maxLevel :: LevelGraph -> Level
+maxLevel = maximum . (map snd) . Graph.labNodes
+           
 getLevelCGN :: (Int,CodeGraphNodeLabel) -> Level
 getLevelCGN = ((\(CodeGraphNodeLabel (lvl,_,_)) -> lvl ) . snd)
 
 minLevelCG :: CodeGraph -> Level
 minLevelCG = minimum . (map getLevelCGN) . Graph.labNodes
+
+maxLevelCG :: CodeGraph -> Level
+maxLevelCG = maximum . (map getLevelCGN) . Graph.labNodes
 
 -- This works only for level graphs from the defining property for edges
 lGraphTopSort :: LevelGraph -> [Graph.LNode Level]
@@ -113,7 +119,7 @@ cGraphLevelSort :: CodeGraph -> [[Graph.LNode CodeGraphNodeLabel]]
 cGraphLevelSort graph = [ subList l | l <- levels ]
   where 
     topSort = cGraphTopSort graph
-    levels = List.nub $ map getLevelCGN topSort
+    levels = List.sort . List.nub $ map getLevelCGN topSort
     subList l = [ (node,CodeGraphNodeLabel (l',ctype,time)) |  (node,CodeGraphNodeLabel (l',ctype,time)) <- topSort, l'==l]
 
 levelsLGraph :: LevelGraph -> Int
@@ -141,7 +147,30 @@ cgGetSubFunctions graph = Graph.labNodes $ Graph.labnfilter isFunctionNode graph
 graphGetLeaves ::  Gr a b -> [Graph.LNode a]
 graphGetLeaves gr = Graph.labNodes $ Graph.nfilter (null . Graph.suc gr) gr
 
-
+cgSplitAtLvl :: Int -> CodeGraph ->  ([Graph.LNode CodeGraphNodeLabel], CodeGraph)
+cgSplitAtLvl lvl graph = 
+    let
+        lastlvl = head $ reverse $ cGraphLevelSort graph
+        lastlvlnodes = map fst lastlvl
+        restgraph = Graph.delNodes lastlvlnodes graph 
+    in (lastlvl, restgraph)
+  
+cgMakeLvlNamed:: Int -> [String] -> CodeGraph -> CodeGraph
+cgMakeLvlNamed lvl names graph = 
+    let
+        lvllist = List.sort . List.nub . (map getLevelCGN) . Graph.labNodes $ graph
+        lvllabelednodes =  (cGraphLevelSort graph !! ((fromMaybe (-1)) $ List.elemIndex lvl lvllist)) -- should fail if Nothing
+        lvlnodes = map fst lvllabelednodes
+        convertFunction = (\(name, index) -> 
+                           (\(p,v,l,s) ->
+                           if v == index 
+                           then (p,v,makeCGNodeNamedFunction name l,s)
+                           else (p,v,l,s)
+                           )
+                          )
+        convertFunction' graph toChange = Graph.gmap (convertFunction toChange) graph
+        replaceList = zip names lvlnodes
+    in foldl convertFunction' graph replaceList -- TODO: improve: this traveres graphs every time for each replace
 ------------------------------------------------------------
 -- Random-monad helper functions
 ------------------------------------------------------------
@@ -276,6 +305,9 @@ makeGraphUnbalancedBigTree graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootno
 
 makeCGNodeTimed :: Int -> CodeGraphNodeLabel -> CodeGraphNodeLabel
 makeCGNodeTimed n = (\(CodeGraphNodeLabel (l,ctype,_)) -> CodeGraphNodeLabel (l,ctype,Just n) ) 
+
+makeCGNodeNamedFunction :: String -> CodeGraphNodeLabel -> CodeGraphNodeLabel
+makeCGNodeNamedFunction name = (\(CodeGraphNodeLabel (l,_,t)) -> CodeGraphNodeLabel (l,NamedFunction name,t) ) 
 
 makeCodeGraphTimed :: Int -> CodeGraph  -> CodeGraph
 makeCodeGraphTimed = Graph.nmap . makeCGNodeTimed 
