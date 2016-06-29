@@ -417,13 +417,16 @@ nodeToUniqueName  =  (++) "local" . show
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
-concatenateTests ::  (String -> NestedCodeGraph -> String) -> [ NestedCodeGraph ] -> String
-concatenateTests toCodeWrapped randomGraphs = singleString
+concatenateTests ::  (String -> NestedCodeGraph -> String) -> [ NestedCodeGraph ] -> [(String,String)]
+concatenateTests toCodeWrapped randomGraphs = resultStrings
     where
       randomGraphsNumbered = zip [0..] randomGraphs
       totallevels = maximum $ map (levelsCGraph . fst) randomGraphs
-      strings = map (\(x,y) -> toCodeWrapped ("run_test_level" ++ (show $ levelsCGraph $ fst y) ++ "_" ++ show (x `quot` totallevels)) y) randomGraphsNumbered
-      singleString = List.intercalate "\n" strings
+      genName = (\(x,y) -> ("run_test_level" ++ (show $ levelsCGraph $ fst y) ++ "_" ++ show (x `quot` totallevels)))
+      genCode = (\(x,y) -> toCodeWrapped (genName (x, y) ) y)
+      strings = map genCode randomGraphsNumbered
+      names = map genName randomGraphsNumbered
+      resultStrings = zip names strings 
 
 
 listTests ::  [ NestedCodeGraph ] -> String

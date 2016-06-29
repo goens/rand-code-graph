@@ -45,6 +45,7 @@ import           Control.Monad
 import qualified System.Random (mkStdGen, getStdGen, StdGen)
 import           Data.Traversable (mapAccumL)
 import           Data.Tuple (swap)
+import           Data.List (intercalate)
 import           Data.Tuple.Sequence         
 import           System.Console.CmdArgs
 import           Control.Arrow (first)
@@ -105,7 +106,7 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len =
         generatingFunction :: [Int] -> m CodeGraph 
         generatingFunction = \llist -> (genRandomCodeGraph weightMap typeWeights llist) >>= makeCondCGWithProb ifPercentage
         mainGraph = lvllist >>= generatingFunction 
-        subGraphs = mainGraph >>= (generateSubGraphs generatingFunction 2) -- TODO: make depth not hard-coded! 
+        subGraphs = mainGraph >>= (generateSubGraphs generatingFunction 1) -- TODO: make depth not hard-coded! 
     in sequenceT (mainGraph, subGraphs) 
 
 randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
@@ -118,7 +119,7 @@ randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len =
     in sequenceT (mainGraph, subGraphs)
 
 
-genExampleBenchmark :: LGCmdArgs -> String
+genExampleBenchmark :: LGCmdArgs -> [(String, String)] -- Name, Code
 genExampleBenchmark lgArgs = let
 
     -- Options (arguments)
@@ -155,10 +156,11 @@ genExampleBenchmark lgArgs = let
             )
         else
             (\lvl -> runRand (randomBenchmark' lvl) gen)
-    concatenateFun = case lang of
-                       "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
-                       "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y) -- The same as HaskellDo
-                       _ -> concatenateTests
+    concatenateFun = concatenateTests
+        -- case lang of
+        --                "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
+        --                "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y) -- The same as HaskellDo
+        --                _ -> concatenateTests
     in concatenateFun (toCodeWrapped lang) $ snd $ mapAccumL (\x y -> swap $ randomBenchmark x y) stdGen lvllist
 
 
@@ -187,7 +189,7 @@ data LGCmdArgs = LGCmdArgs {output :: String,
                            } deriving (Show, Data, Typeable)
 
 lgCmdArgs :: LGCmdArgs
-lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file. If no output file nor a namespace is given, only the graph code is output to stdout.",
+lgCmdArgs = LGCmdArgs {output = "" &= name "o" &= help "Output to file (prefix). If no output file nor a namespace is given, only the graph code is output to stdout.",
                        levels = 10 &= name "l" &= help "When several graphs are generated, this gives the maximum number of levels the graphs will have. Will generate graphs having l levels, l-1 levels, and so forth until 1. They will be repeated once the list is finished, if there are more graphs than levels. Default is 10",
                        totalGraphs = 1 &= name "n" &= help "Total number of graphs to generate. Default is 1",
                        language = "Ohua" &= name "L" &= help "Language to outpt in. \"Graph\" for graphs. Default is Ohua.",
@@ -283,7 +285,38 @@ checkArgs lgArgs = do
                  return errorOcurred
 
   return errorOcurred
+-- --------------------
+--    output functions
+-- --------------------
 
+prepareOutputStrings :: FilePath -> [ (String,String) ] -> IO [(String,String)]
+prepareOutputStrings preambleFile graphStrings = 
+    let 
+        appendPre :: (String, String) -> IO (String, String)
+        appendPre (name, code) =
+            do 
+              pre <- readFile preambleFile
+              return (name, pre ++ code)
+    in sequence $ map appendPre graphStrings
+       
+printSerialized :: [(String,String)] -> IO ()
+printSerialized codeGraphs = 
+    let
+        codeStrings = map snd codeGraphs
+        serial = intercalate "\n" codeStrings
+    in putStrLn serial
+        
+writeToFiles :: String -> [(String,String)] -> IO ()
+writeToFiles filename codeGraphs = 
+    let
+        codeStrings = map snd codeGraphs
+        names = map fst codeGraphs
+        writeToFile name code = writeFile (filename ++ name) code 
+        outputsToFile = zipWith writeToFile names codeStrings
+    in 
+      do
+        sequence outputsToFile 
+        return ()
 -- ----------------
 --      main
 -- ----------------
@@ -303,16 +336,16 @@ main = do
         let outputFile = output lgArgs
 
         -- Execute benchmark
-        let outputString = genExampleBenchmark lgArgs
-
-        outputString <- case preamble lgArgs of
-                            Nothing -> return outputString
-                            Just file -> liftM (++ outputString) $ readFile file
+        let outputStrings = genExampleBenchmark lgArgs
 
         -- Print it accordingly
+        outputStrings <- case preamble lgArgs of
+                            Nothing -> return outputStrings
+                            Just file -> prepareOutputStrings file outputStrings  
+
         if outputFile == "" then
-            putStrLn outputString
+            printSerialized outputStrings 
         else
-            writeFile outputFile outputString
+            writeToFiles outputFile outputStrings
 
   return ()
