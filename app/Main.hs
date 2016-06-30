@@ -40,7 +40,6 @@ import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph,
                               makeCondCGWithProb, concatenateTests, listTests,
                               genRandomCodeGraph, genRandomCodeGraphBigDS)
 import           Backend (toCodeWrapped)
-import           Control.Applicative ((<|>))
 import           Control.Monad.Random (runRand, evalRand)
 import           Control.Monad
 import qualified System.Random (mkStdGen, getStdGen, StdGen, random)
@@ -55,6 +54,7 @@ import           Control.Monad.Random (MonadRandom,fromList)
 import           Control.Monad (liftM)
 import qualified Data.Graph.Inductive as Graph
 import qualified Data.Map.Strict                                             as Map
+import Debug.Trace (traceShowId)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -78,7 +78,7 @@ generateSubGraphs generatingFunction remainingDepth graph = liftM2 (++) subgraph
     currentSubgraphs = mapM (if remainingDepth <= 0 then mkSubgraphNoDepth else mkSubgraph) subnodes
     subgraphsFull = zipMon currentSubgraphs names
     continueGenerating :: CodeGraph -> m CodeSubGraphs
-    continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
+    continueGenerating = generateSubGraphs generatingFunction (traceShowId $ remainingDepth - 1)
     rest
         | remainingDepth <= 0 = return [] :: m CodeSubGraphs
         | otherwise = do
@@ -200,7 +200,7 @@ testThat _ _ = Nothing
 
 
 checkArgs :: LGCmdArgs -> [String]
-checkArgs lgArgs@(LGCmdArgs
+checkArgs (LGCmdArgs
   { levels = l
   , cachenum = c
   , totalGraphs = n
@@ -217,8 +217,8 @@ checkArgs lgArgs@(LGCmdArgs
       [ testThat (l <= 0) "Error: Non-positive level!"
       , testThat (fromMaybe 1 c <= 0) "Error: Non-positive nomber request types (cache)!"
       , testThat (n < 0) "Error: Negative number of graphs!"
-      , testThat (lang `notElem` ["OhuaApp", "HaskellDoApp", "HaskellDo", "MuseApp", "MuseMonad", "Graph"]) "Error: Unrecognized language! (maybe not capitalized?)"
-      , testThat (s < 0 || s /= (-1)) "Error: Negative seed!"
+      , testThat (lang `notElem` map fst acceptedLanguages) "Error: Unrecognized language! (maybe not capitalized?)"
+      , testThat (s < -1) "Error: Negative seed!"
       , testThat (d < 0) "Error: Negative (max) depth!"
       , testThat
             ((srcPercentage < 0) || (srcPercentage > 1) ||
@@ -231,6 +231,17 @@ checkArgs lgArgs@(LGCmdArgs
 -- --------------------
 --    output functions
 -- --------------------
+
+acceptedLanguages :: [(String, String)]
+acceptedLanguages =
+    [ ("Ohua", ".clj")
+    , ("OhuaApp", ".clj")
+    , ("HaskellDoApp", ".hs")
+    , ("HaskellDo", ".hs")
+    , ("MuseApp", ".clj")
+    , ("MuseMonad", ".clj")
+    , ("Graph", "")
+    ]
 
 prepareOutputStrings :: FilePath -> [ (String,String) ] -> IO [(String,String)]
 prepareOutputStrings preambleFile graphStrings = sequence $ map appendPre graphStrings
@@ -247,12 +258,12 @@ printSerialized codeGraphs =
         serial = intercalate "\n" codeStrings
     in putStrLn serial
 
-writeToFiles :: String -> [(String,String)] -> IO ()
-writeToFiles filename codeGraphs =
+writeToFiles :: String -> String -> [(String,String)] -> IO ()
+writeToFiles filename fileExt codeGraphs =
     let
         codeStrings = map snd codeGraphs
         names = map fst codeGraphs
-        writeToFile name code = writeFile (filename ++ name) code
+        writeToFile name code = writeFile (filename ++ name ++ fileExt) code
         outputsToFile = zipWith writeToFile names codeStrings
     in void $ sequence outputsToFile
 -- ----------------
@@ -276,13 +287,12 @@ main = do
                             putStrLn $ "No seed provided, running with random seed: " ++ show randSeed
                             return randSeed
                         else return $ seed lgArgs
-        let lgArgs = lgArgs { seed = randSeed }
         -- Setup (seed, output file)
         --setSeed (seed lgArgs)
         let outputFile = output lgArgs
 
         -- Execute benchmark
-        let outputStrings = genExampleBenchmark lgArgs
+        let outputStrings = genExampleBenchmark lgArgs { seed = randSeed }
 
         -- Print it accordingly
         outputStrings <- case preamble lgArgs of
@@ -292,4 +302,4 @@ main = do
         if outputFile == "" then
             printSerialized outputStrings
         else
-            writeToFiles outputFile outputStrings
+            writeToFiles outputFile (fromJust $ lookup (language lgArgs) acceptedLanguages) outputStrings
