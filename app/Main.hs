@@ -39,7 +39,7 @@ import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph,
                               nodeToUniqueName, cgGetSubFunctions,
                               makeCondCGWithProb, concatenateTests, listTests,
                               genRandomCodeGraph, genRandomCodeGraphBigDS)
-import           Backend (toCodeWrapped)
+import           Backend (toCodeWrapped, acceptedLanguages)
 import           Control.Monad.Random (runRand, evalRand)
 import           Control.Monad
 import qualified System.Random (mkStdGen, getStdGen, StdGen, random)
@@ -54,7 +54,6 @@ import           Control.Monad.Random (MonadRandom,fromList)
 import           Control.Monad (liftM)
 import qualified Data.Graph.Inductive as Graph
 import qualified Data.Map.Strict                                             as Map
-import Debug.Trace (traceShowId)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -78,7 +77,7 @@ generateSubGraphs generatingFunction remainingDepth graph = liftM2 (++) subgraph
     currentSubgraphs = mapM (if remainingDepth <= 0 then mkSubgraphNoDepth else mkSubgraph) subnodes
     subgraphsFull = zipMon currentSubgraphs names
     continueGenerating :: CodeGraph -> m CodeSubGraphs
-    continueGenerating = generateSubGraphs generatingFunction (traceShowId $ remainingDepth - 1)
+    continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
     rest
         | remainingDepth <= 0 = return [] :: m CodeSubGraphs
         | otherwise = do
@@ -217,7 +216,7 @@ checkArgs (LGCmdArgs
       [ testThat (l <= 0) "Error: Non-positive level!"
       , testThat (fromMaybe 1 c <= 0) "Error: Non-positive nomber request types (cache)!"
       , testThat (n < 0) "Error: Negative number of graphs!"
-      , testThat (lang `notElem` map fst acceptedLanguages) "Error: Unrecognized language! (maybe not capitalized?)"
+      , testThat (lang `notElem` Map.keys acceptedLanguages) "Error: Unrecognized language! (maybe not capitalized?)"
       , testThat (s < -1) "Error: Negative seed!"
       , testThat (d < 0) "Error: Negative (max) depth!"
       , testThat
@@ -232,16 +231,6 @@ checkArgs (LGCmdArgs
 --    output functions
 -- --------------------
 
-acceptedLanguages :: [(String, String)]
-acceptedLanguages =
-    [ ("Ohua", ".clj")
-    , ("OhuaApp", ".clj")
-    , ("HaskellDoApp", ".hs")
-    , ("HaskellDo", ".hs")
-    , ("MuseApp", ".clj")
-    , ("MuseMonad", ".clj")
-    , ("Graph", "")
-    ]
 
 prepareOutputStrings :: FilePath -> [ (String,String) ] -> IO [(String,String)]
 prepareOutputStrings preambleFile graphStrings = sequence $ map appendPre graphStrings
@@ -302,4 +291,4 @@ main = do
         if outputFile == "" then
             printSerialized outputStrings
         else
-            writeToFiles outputFile (fromJust $ lookup (language lgArgs) acceptedLanguages) outputStrings
+            writeToFiles outputFile (fst $ fromJust $ Map.lookup (language lgArgs) acceptedLanguages) outputStrings

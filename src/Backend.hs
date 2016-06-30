@@ -8,23 +8,29 @@ import qualified Data.Graph.Inductive as Graph
 import Backends.Ohua        (toOhuaAppCodeWrapped, toOhuaCodeWrapped)
 import Backends.Haxl        (toHaskellDoCodeWrapped, toHaskellDoAppCodeWrapped)
 import Backends.Muse        (toMuseMonadCodeWrapped, toMuseAppCodeWrapped)
+import qualified Data.Map as Map
 
 ------------------------------------------------------------
 -- General Backend
 ------------------------------------------------------------
 
+type GraphGen = String -> NestedCodeGraph -> String
+type FileExtension = String
+
+acceptedLanguages :: Map.Map String (FileExtension, GraphGen)
+acceptedLanguages = Map.fromList
+    [ ("Ohua", (".clj", toOhuaCodeWrapped))
+    , ("OhuaApp", (".clj", toOhuaAppCodeWrapped))
+    , ("HaskellDoApp", (".hs", toHaskellDoAppCodeWrapped))
+    , ("HaskellDo", (".hs", toHaskellDoCodeWrapped))
+    , ("MuseApp", (".clj", toMuseAppCodeWrapped))
+    , ("MuseMonad", (".clj", toMuseMonadCodeWrapped))
+    , ("Graph", ("", toGraphCodeWrapped))
+    ]
+
 -- Improve: replace "string" with a good language type
 toCodeWrapped :: String -> String -> NestedCodeGraph -> String
-toCodeWrapped lang =
-    case lang of
-      "HaskellDo" -> toHaskellDoCodeWrapped
-      "HaskellDoApp" -> toHaskellDoAppCodeWrapped
-      "Ohua" ->  toOhuaCodeWrapped
-      "OhuaApp" ->  toOhuaAppCodeWrapped
-      "Graph" -> toGraphCodeWrapped
-      "MuseMonad" -> toMuseMonadCodeWrapped
-      "MuseApp" -> toMuseAppCodeWrapped
-      _ -> (\_ _ -> "Unexpected language case error")
+toCodeWrapped = maybe (\_ _ -> "Unexpected language case error") snd . flip Map.lookup acceptedLanguages
 
 
 ------------------------------------------------------------
