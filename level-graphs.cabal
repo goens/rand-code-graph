@@ -15,7 +15,7 @@ synopsis:            Project to generate (random) 'level graphs', graphs with in
 -- description:
 
 -- URL for the project homepage or repository.
-homepage:            https://github.com/goens/level-graphs
+homepage:            https://github.com/goens/rand-code-graph
 
 -- The license under which the package is released.
 license:             MIT
