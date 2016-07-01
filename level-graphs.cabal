@@ -1,6 +1,6 @@
 name:                level-graphs
 
--- The package version.  See the Haskell package versioning policy (PVP) 
+-- The package version.  See the Haskell package versioning policy (PVP)
 -- for standards guiding when and how versions should be incremented.
 -- http://www.haskell.org/haskellwiki/Package_versioning_policy
 -- PVP summary:      +-+------- breaking API changes
@@ -12,7 +12,7 @@ version:             0.1.0.0
 synopsis:            Project to generate (random) 'level graphs', graphs with integer vertex labelings such that an edge (v,w) exists only if level v < level w
 
 -- A longer description of the package.
--- description:         
+-- description:
 
 -- URL for the project homepage or repository.
 homepage:            https://github.com/goens/level-graphs
@@ -26,20 +26,20 @@ license-file:        LICENSE
 -- The package author(s).
 author:              Andres Goens
 
--- An email address to which users can send suggestions, bug reports, and 
+-- An email address to which users can send suggestions, bug reports, and
 -- patches.
 maintainer:          andres.goens@tu-dresden.de
 
 -- A copyright notice.
--- copyright:           
+-- copyright:
 
 category:            Data
 
 build-type:          Simple
 
--- Extra files to be distributed with the package, such as examples or a 
+-- Extra files to be distributed with the package, such as examples or a
 -- README.
--- extra-source-files:  
+-- extra-source-files:
 
 -- Constraint on the version of Cabal needed to build this package.
 cabal-version:       >=1.10

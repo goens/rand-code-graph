@@ -11,8 +11,8 @@ import qualified Data.Tuple           as Tuple
 
 cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToOhuaApplicative graph [] = ""
-cgNodesToOhuaApplicative graph [node@(nd, _)] = "" ++ (cgNodeToClojureFunction graph (Graph.suc graph $ nd) node) ++ ""
-cgNodesToOhuaApplicative graph nodes = "(vector " ++ List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes) ++ ")"
+cgNodesToOhuaApplicative graph [node@(nd, _)] = "" ++ (cgNodeToClojureFunction graph (Graph.suc graph nd) node) ++ ""
+cgNodesToOhuaApplicative graph nodes = "(vector " ++ List.intercalate " " (map (\x@(x1,_) -> toFun x $ Graph.suc graph x1) nodes) ++ ")"
     where
       toFun node = flip (cgNodeToClojureFunction graph) node
 

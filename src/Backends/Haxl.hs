@@ -45,7 +45,7 @@ toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
     where
       nodes = reverse $ cGraphTopSort graph --bottom up
       trSpace = "  "
-      helperToHaskellDoCode ns = (concat $ map (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueName (fst $ last ns) ++ "\n"
+      helperToHaskellDoCode ns = (concatMap (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueName (fst $ last ns) ++ "\n"
 
 -- implement haskell subgraphs
 
@@ -61,5 +61,3 @@ toHaskellDoAppCode graph = helperToDoApp nodes ++ "\n"
       helperToDoApp [] = ""
       helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToHaxlApplicative graph [lastLvlNode] ++ "\n"
       helperToDoApp (lvl:lvls) = "        " ++ (levelToDoApp lvl) ++ "\n" ++ (helperToDoApp lvls)
-
-
