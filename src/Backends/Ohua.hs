@@ -25,7 +25,7 @@ toOhuaAppCode graph =  helperToOhuaApp nodes
       levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueName . fst) levelNodes)
                                 ++ "] " ++ cgNodesToOhuaApplicative graph levelNodes
       helperToOhuaApp [] = ""
-      helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction graph [] lastnode
+      helperToOhuaApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureFunction graph (Graph.suc graph $ fst lastnode) lastnode
       helperToOhuaApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToOhuaApp lvls) ++ ""
 
 toOhuaAppCodeWrapped :: String -> NestedCodeGraph -> String
