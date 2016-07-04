@@ -1,6 +1,6 @@
 {-# LANGUAGE ViewPatterns  #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE ScopedTypeVariables, ExplicitForAll #-}
+{-# LANGUAGE ScopedTypeVariables, ExplicitForAll, TupleSections #-}
 -- | Code for generating random level-graphs, a sort of generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
 --   This is part of a project for efficient IO batching using
@@ -83,7 +83,10 @@ data CodeGraphNodeLabel = CodeGraphNodeLabel
 type LevelGraph = Data.Graph.Inductive.Gr Level () -- There can only be edges (a,b) if level a < level b
 type CodeGraph = Gr CodeGraphNodeLabel ()
 
-type CodeSubGraphs = [(CodeGraph, String)]
+
+type Arity = Int
+type FnName = String
+type CodeSubGraphs = [(CodeGraph, FnName, Arity)]
 type NestedCodeGraph = (CodeGraph, CodeSubGraphs)
 
 instance Ord CodeGraphNodeLabel where
@@ -454,8 +457,8 @@ makeCodeGraphRandomlyTimed n gr = liftM Graph.buildGr transformed
 
 makeNestedCodeGraphRandomlyTimed :: forall m . MonadRandom m => Int -> NestedCodeGraph  -> m NestedCodeGraph
 makeNestedCodeGraphRandomlyTimed t (maingraph, subgraphs) = sequenceT ((makeCodeGraphRandomlyTimed t maingraph , mapM makeSubgraphRandomlyTimed subgraphs) :: (m CodeGraph, m CodeSubGraphs))
-    where makeSubgraphRandomlyTimed :: (CodeGraph, String) -> m (CodeGraph, String)
-          makeSubgraphRandomlyTimed = (\(x,y) -> sequenceT ((makeCodeGraphRandomlyTimed t x, return y) :: (m CodeGraph, m String)))
+    where makeSubgraphRandomlyTimed :: (CodeGraph, String, Arity) -> m (CodeGraph, String, Arity)
+          makeSubgraphRandomlyTimed (x,y, z) = (, y, z) <$> makeCodeGraphRandomlyTimed t x
 -- nmapM :: (Graph.DynGraph gr, MonadRandom m) => (a -> m c) -> gr a b -> m (gr c b)
 -- nmapM f = gmapM (\(p,v,l,s)->(p,v,f l,s))
 --     where

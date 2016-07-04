@@ -40,4 +40,4 @@ toCodeWrapped = maybe (\_ _ -> "Unexpected language case error") snd . flip Map.
 toGraphCodeWrapped :: String -> NestedCodeGraph -> String
 toGraphCodeWrapped name (graph, subgraphs) =
     "Graph-" ++ name ++ "\n" ++ Graph.prettify graph ++ "\n" ++
-    (concatMap (\(subgraph,_) -> "Subgraph-" ++ name ++ "\n" ++ Graph.prettify subgraph ++ "\n") subgraphs)
+    (concatMap (\(subgraph,_, _) -> "Subgraph-" ++ name ++ "\n" ++ Graph.prettify subgraph ++ "\n") subgraphs)

@@ -95,26 +95,23 @@ cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeG
 cgNodeToClojureLetDef toCode graph x@(x1,_) = nodeToUniqueName x1 ++ " " ++ cgNodeToClojureFunction graph (Graph.suc graph x1) x
 
 
-toClojureSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, String)] -> String
+toClojureSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
 toClojureSubFunctions _ [] = ""
 toClojureSubFunctions toCode subgraphs = List.intercalate "\n" $ map (toClojureSubFunction toCode) $ reverse subgraphs
 
-toClojureSubFunction :: (CodeGraph -> String) -> (CodeGraph, String) -> String
-toClojureSubFunction toCode namedgr@(graph, name) =
+toClojureSubFunction :: (CodeGraph -> String) -> (CodeGraph, FnName, Arity) -> String
+toClojureSubFunction toCode namedgr =
     let
-        leaves = graphGetLeaves graph
-        numLeaves = length leaves
-        (head, transformedGraph) = toClojureSubFunctionHead namedgr numLeaves
+        (head, transformedGraph) = toClojureSubFunctionHead namedgr
     in "(" ++ head ++ toCode transformedGraph ++ ")"
 
-toClojureSubFunctionHead :: (CodeGraph, String) -> Int -> (String, CodeGraph)
-toClojureSubFunctionHead (graph, name) numLeaves =
+toClojureSubFunctionHead :: (CodeGraph, String, Arity) -> (String, CodeGraph)
+toClojureSubFunctionHead (graph, name, arity) =
     let
-        parameterNamesList' =  map (\x -> "parameter-" ++ show x) [1..]
-        parameterNamesList = take numLeaves parameterNamesList'
+        parameterNamesList =  map (\x -> "parameter-" ++ show x) [1..arity]
         parameterNames = List.intercalate " " parameterNamesList
         transformedGraph = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
-        head = "defalgo " ++ name ++ " [ " ++ parameterNames ++ "]\n"
+        head = "defalgo " ++ name ++ " [" ++ parameterNames ++ "]\n"
     in ( head, transformedGraph)
 
 --cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
