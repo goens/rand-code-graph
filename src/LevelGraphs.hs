@@ -127,21 +127,32 @@ lGraphTopSort :: LevelGraph -> [Graph.LNode Level]
 lGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
 
 lGraphLevelSort :: LevelGraph -> [[Graph.LNode Level]]
-lGraphLevelSort graph = [ subList l | l <- levels ]
+lGraphLevelSort graph = [ lGraphGetLevel l graph | l <- levels ]
   where
     topSort = lGraphTopSort graph
     levels = List.nub $ map snd topSort
+
+lGraphGetLevel :: Int -> LevelGraph -> [Graph.LNode Level]
+lGraphGetLevel lvl graph = subList lvl 
+  where
+    topSort = lGraphTopSort graph
     subList l = [ (node,l) | (node,l') <- topSort, l'==l]
 
 cGraphTopSort :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
 cGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
 
 cGraphLevelSort :: CodeGraph -> [[Graph.LNode CodeGraphNodeLabel]]
-cGraphLevelSort graph = [ subList l | l <- levels ]
+cGraphLevelSort graph = [ cGraphGetLevel l graph | l <- levels ]
   where
     topSort = cGraphTopSort graph
     levels = List.sort . List.nub $ map getLevelCGN topSort
+                
+cGraphGetLevel :: Int -> CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
+cGraphGetLevel lvl graph = subList lvl
+  where
+    topSort = cGraphTopSort graph
     subList l = [ (node,CodeGraphNodeLabel l' ctype time) |  (node,CodeGraphNodeLabel l' ctype time) <- topSort, l'==l]
+
 
 levelsLGraph :: LevelGraph -> Int
 levelsLGraph  = length . List.nub . (map snd) . Graph.labNodes
