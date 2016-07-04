@@ -19,11 +19,12 @@ cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel _ ctype t) =
         SideEffect -> "(write-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr ++ ")"
         NamedFunction name -> "(" ++ name ++ (if null children then [] else " ") ++ childrenStr ++ ")"
         Function -> "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
-        Map -> "(map ifn" ++ nodeToUniqueName n ++ " [" ++ childrenStr ++ "] " ++ ")"
+        Map -> "(smap ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
         Conditional (CondBranch cond) trueBranch falseBranch ->
           "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
             where maybeNodeToUniqueName CondNil = "nil"
                   maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+        Rename name -> name
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
     timeout' = fromMaybe n t
@@ -59,12 +60,13 @@ cgNodeToClojureAppFunction graph children (n,CodeGraphNodeLabel _ ctype t) =
         NamedFunction name -> "(<$>"  ++ name ++ wrappedArgumentStr ++ ")"
         SideEffect -> "(write-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr ++ ")"
         Function -> "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
-        Map -> "(map ifn" ++ nodeToUniqueName n ++ " [" ++ childrenStr ++ "] " ++ ")"
+        Map -> "(smap ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
         Conditional (CondBranch cond) trueBranch falseBranch ->
             "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
           where
               maybeNodeToUniqueName CondNil = "nil"
               maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+        Rename name -> name
   where
     timeout' = fromMaybe n t
     timeoutStr = show timeout'
@@ -112,7 +114,7 @@ toClojureSubFunctionHead (graph, name) numLeaves =
         parameterNamesList = take numLeaves parameterNamesList'
         parameterNames = List.intercalate " " parameterNamesList
         transformedGraph = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
-        head = "defn " ++ name ++ " [ " ++ parameterNames ++ "]\n"
+        head = "defalgo " ++ name ++ " [ " ++ parameterNames ++ "]\n"
     in ( head, transformedGraph)
 
 --cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String

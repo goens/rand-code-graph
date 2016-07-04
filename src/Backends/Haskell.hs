@@ -26,6 +26,7 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
             "if " ++ maybeNodeToUniqueName cond ++ " then " ++ maybeNodeToUniqueName trueBranch ++ " else " ++  maybeNodeToUniqueName falseBranch
           where maybeNodeToUniqueName CondNil = "nil"
                 maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+        Rename name -> name
   where
     timeout' = fromMaybe n t
     timeoutStr = show timeout'
