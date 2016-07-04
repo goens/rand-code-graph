@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DoAndIfThenElse #-}
-{-# LANGUAGE ScopedTypeVariables, ExplicitForAll #-}
+{-# LANGUAGE ScopedTypeVariables, ExplicitForAll, FlexibleContexts #-}
 
 -- | Code for generating random level-graphs, a generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
@@ -33,12 +33,12 @@
 --   andres.goens@tu-dresden.de
 
 --import Debug.Trace (trace)
-import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph,
+import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph, CodeGraphNodeLabel(..),
                               makeCodeGraphRandomlyTimed,
                               makeNestedCodeGraphRandomlyTimed,
                               nodeToUniqueName, cgGetSubFunctions,
                               makeCondCGWithProb, concatenateTests, listTests,
-                              genRandomCodeGraph, genRandomCodeGraphBigDS)
+                              genRandomCodeGraph, genRandomCodeGraphBigDS, traceWith)
 import           Backend (toCodeWrapped, acceptedLanguages)
 import           Control.Monad.Random (runRand, evalRand)
 import           Control.Monad
@@ -48,15 +48,32 @@ import           Data.Tuple (swap)
 import           Data.List (intercalate)
 import           Data.Tuple.Sequence
 import           System.Console.CmdArgs
-import           Control.Arrow (first)
+import           Control.Arrow (first, second)
 import           Data.Maybe (fromMaybe,fromJust,isJust, catMaybes)
 import           Control.Monad.Random (MonadRandom,fromList)
 import           Control.Monad (liftM)
-import qualified Data.Graph.Inductive as Graph
+import Data.Graph.Inductive as Graph
 import qualified Data.Map.Strict                                             as Map
+import Control.Monad.Trans.State.Strict (evalStateT)
+import Control.Monad.State.Class
+import Debug.Trace
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
+
+--
+relabelNodes :: MonadState Int m => [CodeGraph] -> m [CodeGraph]
+relabelNodes subgraphs = mapM f subgraphs
+    where
+        f graph = do
+            s <- get
+            let f2 (_, index, label, _) = insNode (trace ("Relabeled node " ++ show index ++ " to " ++ show (index + s) ++ "\n") (index + s), label)
+                g = ufold f2 (Graph.empty :: Gr CodeGraphNodeLabel ()) graph
+                g2 = foldl (\gr (n1, n2) -> insEdge (n1 + s, n2+s, ()) gr) g (edges graph)
+            let (_, upper) = Graph.nodeRange g2
+            put $ succ upper
+            return g2
+
 
 exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
@@ -64,31 +81,35 @@ exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n]
 zipMon :: Monad m => m [a] -> [b] -> m [(a,b)] -- there is probably a std lib function for this
 zipMon as bs = liftM2 zip as $ return bs
 
-generateSubGraphs :: forall m. MonadRandom m => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
-generateSubGraphs generatingFunction remainingDepth graph = liftM2 (++) subgraphsFull rest
+generateSubGraphs :: forall m. (MonadRandom m, MonadState Int m) => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
+generateSubGraphs generatingFunction remainingDepth graph = do
+    r<- rest
+    return $ traceShow (map snd r) r
 -- I probably will run into a name clash here. Either give them different unique names or find a way to nest the contexts in the backend
   where
-    subnodes = cgGetSubFunctions graph
+    subnodes = (\a -> trace ("Found functions on nodes " ++ show (map (second computationType) a)) a) $ cgGetSubFunctions graph
     makeNode = fst
     names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes :: [String]
-    mkSubgraph lnode = generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]
-    mkSubgraphNoDepth lnode = generatingFunction []  -- this should yield no further iterations
     currentSubgraphs :: m [CodeGraph]
-    currentSubgraphs = mapM (if remainingDepth <= 0 then mkSubgraphNoDepth else mkSubgraph) subnodes
-    subgraphsFull = zipMon currentSubgraphs names
+    currentSubgraphs = mapM (\lnode -> generatingFunction (if remainingDepth <= 0 then [] else [1,length $ Graph.suc graph $ makeNode lnode])) subnodes >>= relabelNodes
     continueGenerating :: CodeGraph -> m CodeSubGraphs
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
     rest
-        | remainingDepth <= 0 = return [] :: m CodeSubGraphs
+        | remainingDepth <= 0 = zipMon currentSubgraphs names :: m CodeSubGraphs
         | otherwise = do
             gs <- currentSubgraphs -- :: [CodeGraph]
             listOfSubGraphs <-  mapM continueGenerating gs :: m [CodeSubGraphs]
             let oneSubGraphs = concat listOfSubGraphs
-            return oneSubGraphs :: m CodeSubGraphs
+            return $ zip gs names ++ oneSubGraphs :: m CodeSubGraphs
 
-randomExampleBenchmark :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
+randomExampleBenchmark :: forall m . (MonadRandom m, MonadState Int m) => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 --randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
-randomExampleBenchmark weightMap typeWeights ifPercentage len = sequenceT (mainGraph, subGraphs)
+randomExampleBenchmark weightMap typeWeights ifPercentage len = do
+    gr <- mainGraph
+    let (_, upper) = Graph.nodeRange gr
+    put upper
+    subgr <- generateSubGraphs generatingFunction 1 (traceWith "first gr" gr)  -- TODO: make depth not hard-coded!
+    return (gr, subgr)
   where
     lvllist :: m [Int]
     lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
@@ -96,9 +117,9 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len = sequenceT (mainG
     generatingFunction :: [Int] -> m CodeGraph
     generatingFunction = genRandomCodeGraph weightMap typeWeights >=> makeCondCGWithProb ifPercentage
     mainGraph = lvllist >>= generatingFunction
-    subGraphs = mainGraph >>= (generateSubGraphs generatingFunction 1) -- TODO: make depth not hard-coded!
 
-randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
+
+randomExampleBenchmarkBDS :: forall m . (MonadRandom m, MonadState Int m)=> Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len =
     let
         lvllist :: m [Int]
@@ -131,19 +152,16 @@ genExampleBenchmark
     weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
     concatenateFun = concatenateTests
-    randomBenchmark' :: MonadRandom m => Int -> m NestedCodeGraph
+    randomBenchmark' :: (MonadRandom m, MonadState Int m) => Int -> m NestedCodeGraph
     randomBenchmark' lvl
         | slowDS = randomExampleBenchmarkBDS weightMap typeWeights ifPercentage lvl
-        | otherwise = randomExampleBenchmark weightMap typeWeights ifPercentage lvl
+        | otherwise = (\a@(gr, _) -> trace ("after benchm " ++ show gr) a) <$> randomExampleBenchmark weightMap typeWeights ifPercentage lvl
 
     randomBenchmark :: System.Random.StdGen -> Int -> (NestedCodeGraph, System.Random.StdGen)
     randomBenchmark gen lvl
-        | isJust cache =
-            Control.Arrow.first (\x -> flip evalRand gen
-                $ makeNestedCodeGraphRandomlyTimed (fromJust cache) x)
-                -- first f '=' (f,id)
-                $ runRand (randomBenchmark' lvl) gen
-        | otherwise = runRand (randomBenchmark' lvl) gen
+        | isJust cache = flip runRand gen $ flip evalStateT 0 $ do
+            randomBenchmark' lvl >>= makeNestedCodeGraphRandomlyTimed (fromJust cache)
+        | otherwise = runRand (evalStateT (randomBenchmark' lvl) 0) gen
         -- case lang of
         --                "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
         --                "HaskellDoApp" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y) -- The same as HaskellDo

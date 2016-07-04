@@ -47,7 +47,12 @@ import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple
 import Control.Arrow (second)
 import Data.Function (on)
+import Debug.Trace
 --import           Data.Typeable()
+
+traceWith :: Show a => String -> a -> a
+traceWith msg a = trace (msg ++ " " ++ show a) a
+
 
 data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
 
@@ -62,6 +67,7 @@ data ComputationType
     | NamedFunction String
     | Conditional CondBranch CondBranch CondBranch
     | SlowDataSource
+    | Rename String -- TODO this is not good
     deriving (Show, Eq) --conditional: condition true-branch false-branch
 
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
@@ -171,12 +177,12 @@ cgMakeLvlNamed:: Int -> [String] -> CodeGraph -> CodeGraph
 cgMakeLvlNamed lvl names graph =
     let
         lvllist = List.sort . List.nub . (map getLevelCGN) . Graph.labNodes $ graph
-        lvllabelednodes =  (cGraphLevelSort graph !! ((fromMaybe (-1)) $ List.elemIndex lvl lvllist)) -- should fail if Nothing
+        lvllabelednodes = cGraphLevelSort graph !! fromMaybe (error "Nothing") (List.elemIndex lvl lvllist) -- should fail if Nothing
         lvlnodes = map fst lvllabelednodes
         convertFunction = (\(name, index) ->
                            (\(p,v,l,s) ->
                            if v == index
-                           then (p,v,makeCGNodeNamedFunction name l,s)
+                           then (p,v,l { computationType = Rename name },s)
                            else (p,v,l,s)
                            )
                           )
