@@ -112,6 +112,10 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len = do
   where
     lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
     --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
+
+    -- This type signature is necessary to make the return independant of the
+    -- concrete monad, since this is bound once in MonadRandom m and the StateT
+    -- wrapped monad.
     generatingFunction :: MonadRandom m => [Int] -> m CodeGraph
     generatingFunction = genRandomCodeGraph weightMap typeWeights >=> makeCondCGWithProb ifPercentage
     mainGraph = lvllist >>= generatingFunction
