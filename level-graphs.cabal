@@ -72,7 +72,6 @@ executable random-level-graphs
                        MonadRandom,
                        containers,
                        tuple,
-                       transformers,
                        mtl
   hs-source-dirs:      app
   main-is:             Main.hs

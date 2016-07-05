@@ -54,8 +54,8 @@ import           Control.Monad.Random (MonadRandom,fromList)
 import           Control.Monad (liftM)
 import Data.Graph.Inductive as Graph
 import qualified Data.Map.Strict                                             as Map
-import Control.Monad.Trans.State.Strict (evalStateT)
 import Control.Monad.State.Class
+import Control.Monad.State.Strict (evalStateT)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -102,24 +102,22 @@ generateSubGraphs generatingFunction remainingDepth graph
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 
 
-randomExampleBenchmark :: forall m . (MonadRandom m, MonadState Int m) => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
+randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 --randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
 randomExampleBenchmark weightMap typeWeights ifPercentage len = do
     gr <- mainGraph
     let (_, upper) = Graph.nodeRange gr
-    put upper
-    subgr <- generateSubGraphs generatingFunction 1 gr  -- TODO: make depth not hard-coded!
+    subgr <- flip evalStateT upper $ generateSubGraphs generatingFunction 1 gr  -- TODO: make depth not hard-coded!
     return (gr, subgr)
   where
-    lvllist :: m [Int]
     lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
     --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
-    generatingFunction :: [Int] -> m CodeGraph
+    generatingFunction :: MonadRandom m => [Int] -> m CodeGraph
     generatingFunction = genRandomCodeGraph weightMap typeWeights >=> makeCondCGWithProb ifPercentage
     mainGraph = lvllist >>= generatingFunction
 
 
-randomExampleBenchmarkBDS :: forall m . (MonadRandom m, MonadState Int m)=> Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
+randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len =
     let
         lvllist :: m [Int]
@@ -152,14 +150,14 @@ genExampleBenchmark
     weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
     concatenateFun = concatenateTests
-    randomBenchmark' :: (MonadRandom m, MonadState Int m) => Int -> m NestedCodeGraph
+    randomBenchmark' :: MonadRandom m => Int -> m NestedCodeGraph
     randomBenchmark' lvl
         | slowDS = randomExampleBenchmarkBDS weightMap typeWeights ifPercentage lvl
         | otherwise = randomExampleBenchmark weightMap typeWeights ifPercentage lvl
 
     randomBenchmark :: System.Random.StdGen -> Int -> (NestedCodeGraph, System.Random.StdGen)
     randomBenchmark gen lvl
-        | isJust cache = flip runRand gen $ flip evalStateT 0 $ do
+        | isJust cache = flip runRand gen $ do
             randomBenchmark' lvl >>= makeNestedCodeGraphRandomlyTimed (fromJust cache)
         | otherwise = runRand (evalStateT (randomBenchmark' lvl) 0) gen
         -- case lang of
