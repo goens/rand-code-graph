@@ -19,6 +19,7 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
         DataSource -> "getData \"service-name\" " ++ timeoutChildrenList
         SlowDataSource -> "slowGetData \"service-name\" " ++ listWTimeout (show $ 10000 + timeout')
         OtherComputation -> "compute " ++ timeoutChildrenList
+        NamedFunction name ->  name ++ " " ++ timeoutChildrenList
         Function -> "ifn" ++ nodeToUniqueName n ++ " "  ++ timeoutChildrenList
         Map -> "map ifn" ++ nodeToUniqueName n ++ " " ++ timeoutChildrenList
         SideEffect -> "writeData \"service-name\" " ++ timeoutChildrenList
@@ -34,3 +35,10 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
 
 cgNodeToHaskellDoBind:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToHaskellDoBind graph x@(x1,_) = nodeToUniqueName x1 ++ " <- " ++ cgNodeToHaskellFunction (Graph.suc graph x1) x
+
+toHaskellDoCode :: CodeGraph -> String
+toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
+    where
+      nodes = reverse $ cGraphTopSort graph --bottom up
+      trSpace = "  "
+      helperToHaskellDoCode ns = (concatMap (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueName (fst $ last ns) ++ "\n"

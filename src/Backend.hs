@@ -6,7 +6,7 @@ import qualified Data.Graph.Inductive as Graph
 
 -- TODO: a more general mechanism is needed here that should take this configuration from the command line. -> API-design.
 import Backends.Ohua        (toOhuaAppCodeWrapped, toOhuaCodeWrapped)
-import Backends.Haxl        (toHaskellDoCodeWrapped, toHaskellDoAppCodeWrapped)
+import Backends.Haxl        (toHaxlDoCodeWrapped, toHaxlDoAppCodeWrapped)
 import Backends.Muse        (toMuseMonadCodeWrapped, toMuseAppCodeWrapped)
 import qualified Data.Map as Map
 
@@ -21,8 +21,8 @@ acceptedLanguages :: Map.Map String (FileExtension, GraphGen)
 acceptedLanguages = Map.fromList
     [ ("Ohua", (".clj", toOhuaCodeWrapped))
     , ("OhuaApp", (".clj", toOhuaAppCodeWrapped))
-    , ("HaskellDoApp", (".hs", toHaskellDoAppCodeWrapped))
-    , ("HaskellDo", (".hs", toHaskellDoCodeWrapped))
+    , ("HaxlDoApp", (".hs", toHaxlDoAppCodeWrapped))
+    , ("HaxlDo", (".hs", toHaxlDoCodeWrapped))
     , ("MuseApp", (".clj", toMuseAppCodeWrapped))
     , ("MuseMonad", (".clj", toMuseMonadCodeWrapped))
     , ("Graph", ("", toGraphCodeWrapped))
