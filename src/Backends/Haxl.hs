@@ -42,7 +42,7 @@ toHaxlDoAppCode graph = helperToDoApp nodes ++ "\n"
 
 toHaxlCode :: String -> NestedCodeGraph -> (CodeGraph -> String)-> String
 toHaxlCode testname (graph, subgraphs) codeStyleFun = (toHaskellSubFunctions codeStyleFun subgraphs) ++ "\n" ++
-                                                  testname ++ " :: Env u -> IO Int\n" ++
+                                                  testname ++ " :: Env () -> IO Int\n" ++
                                                      testname ++ " myEnv =\n" ++
                                                      "    runHaxl myEnv $ do\n" ++
                                                      codeStyleFun graph ++ "\n"

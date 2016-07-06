@@ -59,7 +59,9 @@ toHaskellSubFunctionHead :: (CodeGraph, String, Arity) -> (String, CodeGraph)
 toHaskellSubFunctionHead (graph, name, arity) =
     let
         parameterNamesList =  map (\x -> "parameter_" ++ show x) [1..arity]
+        paramTypes = List.replicate arity "Int"
+        typeSignature = name ++ "::" ++ List.intercalate " -> " (paramTypes ++ ["GenHaxl u Int"])
         parameterNames = List.intercalate " " parameterNamesList
         transformedGraph = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
-        head = name ++ " " ++ parameterNames ++ " = do\n"
+        head = typeSignature ++ "\n" ++ name ++ " " ++ parameterNames ++ " = do\n"
     in (head, transformedGraph)
