@@ -49,7 +49,7 @@ toMuseMonadCode :: CodeGraph -> String
 toMuseMonadCode graph = helperToMuseCode nodes ++ "\n"
     where
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (cgNodeToClojureLetDef toMuseMonadCode graph) levelNodes) ++ "]"
+      levelToMuse levelNodes = "mlet [" ++ List.intercalate " " (map (\node@(nid, _) -> nodeToUniqueName nid ++ " " ++ cgNodeToMuseFunction graph (Graph.suc graph nid) node) levelNodes) ++ "]"
       helperToMuseCode [] = ""
       helperToMuseCode [[lastLvlNode]] = cgNodeToMuseFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
       helperToMuseCode (lvl:lvls) = "(" ++ (levelToMuse lvl) ++ "\n" ++ (helperToMuseCode lvls) ++ ")"
