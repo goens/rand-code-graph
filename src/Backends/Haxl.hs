@@ -26,21 +26,6 @@ cgNodesToHaxlApplicative graph [node] = cgNodeToHaxlFunction (Graph.suc graph $ 
 cgNodesToHaxlApplicative graph nodes = "(" ++ (flip replicate ',' $ pred $ length nodes) ++ ") <$> "
                                 ++  (List.intercalate " <*> " (map (\x -> flip cgNodeToHaxlFunction x $ Graph.suc graph $ fst x) nodes))
 
--- Here: add recursive call to generate functions in Function and Map nodes
-toHaxlDoCodeWrapped :: String -> NestedCodeGraph -> String
-toHaxlDoCodeWrapped testname (graph, subgraphs) = testname ++ " :: Env u -> IO Int\n" ++
-                                                     testname ++ " myEnv =\n" ++
-                                                     "    runHaxl myEnv $ do\n" ++
-                                                     toHaskellDoCode graph ++ "\n"
-
--- Here: add recursive call to generate functions in Function and Map nodes
-toHaxlDoAppCodeWrapped :: String -> NestedCodeGraph -> String
-toHaxlDoAppCodeWrapped testname (graph, subgraphs) =
-    testname ++ " :: Env u -> IO Int\n" ++
-    testname ++ " myEnv =\n" ++ "    runHaxl myEnv $ do\n" ++
-    toHaxlDoAppCode graph ++ "\n"
-
--- implement haskell subgraphs
 
 toHaxlDoAppCode :: CodeGraph -> String
 toHaxlDoAppCode graph = helperToDoApp nodes ++ "\n"
@@ -53,3 +38,19 @@ toHaxlDoAppCode graph = helperToDoApp nodes ++ "\n"
       helperToDoApp [] = ""
       helperToDoApp [[lastLvlNode]] = "        " ++ cgNodesToHaxlApplicative graph [lastLvlNode] ++ "\n"
       helperToDoApp (lvl:lvls) = "        " ++ (levelToDoApp lvl) ++ "\n" ++ (helperToDoApp lvls)
+
+
+toHaxlCode :: String -> NestedCodeGraph -> (CodeGraph -> String)-> String
+toHaxlCode testname (graph, subgraphs) codeStyleFun = (toHaskellSubFunctions codeStyleFun subgraphs) ++ "\n" ++
+                                                  testname ++ " :: Env u -> IO Int\n" ++
+                                                     testname ++ " myEnv =\n" ++
+                                                     "    runHaxl myEnv $ do\n" ++
+                                                     codeStyleFun graph ++ "\n"
+
+-- Here: add recursive call to generate functions in Function and Map nodes
+toHaxlDoCodeWrapped :: String -> NestedCodeGraph -> String
+toHaxlDoCodeWrapped testName graph = toHaxlCode testName graph toHaskellDoCode
+
+-- Here: add recursive call to generate functions in Function and Map nodes
+toHaxlDoAppCodeWrapped :: String -> NestedCodeGraph -> String
+toHaxlDoAppCodeWrapped testName graph = toHaxlCode testName graph toHaxlDoAppCode
