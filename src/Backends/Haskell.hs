@@ -23,9 +23,8 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
         Map -> "map ifn" ++ nodeToUniqueName n ++ " " ++ timeoutChildrenList
         SideEffect -> "writeData \"service-name\" " ++ timeoutChildrenList
         Conditional cond trueBranch falseBranch ->
-            "if " ++ maybeNodeToUniqueName cond ++ " then " ++ maybeNodeToUniqueName trueBranch ++ " else " ++  maybeNodeToUniqueName falseBranch
-          where maybeNodeToUniqueName CondNil = "nil"
-                maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+            "if " ++ maybe "True" nodeToUniqueName cond ++ " then " ++ f trueBranch ++ " else " ++ f falseBranch
+          where f = maybe "0" nodeToUniqueName
         Rename name -> name
   where
     timeout' = fromMaybe n t

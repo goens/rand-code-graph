@@ -16,6 +16,8 @@ cgNodeToMuseFunction gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
     case ctype of
         -- FIXME
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
+        Conditional cond trueBranch falseBranch ->
+          "(return (if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ "))"
         otherwise -> cgNodeToClojureFunction gr children labeledNode
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
@@ -29,6 +31,8 @@ cgNodeToMuseAppFunction graph children labeledNode@(n,CodeGraphNodeLabel _ ctype
         OtherComputation -> "(<$> compute " ++ wrappedArgumentStr ++ ")"
         -- FIXME
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
+        Conditional cond trueBranch falseBranch ->
+          "(return (if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ "))"
         otherwise -> cgNodeToClojureAppFunction graph children labeledNode
   where
     timeout' = fromMaybe n t
@@ -73,7 +77,7 @@ toMuseAppCode graph =  helperToMuseApp nodes
       levelToDoApp levelNodes = "[" ++ List.intercalate " " (map (nodeToUniqueName . fst) levelNodes)
                                 ++ "] " ++ cgNodesToMuseApplicative graph levelNodes
       helperToMuseApp [] = ""
-      helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToClojureAppFunction graph [] lastnode
+      helperToMuseApp [[lastnode]] = (if levels == 1 then "" else "]") ++ cgNodeToMuseAppFunction graph (Graph.suc graph $ fst lastnode) lastnode
       helperToMuseApp (lvl:lvls) = (levelToDoApp lvl) ++ "\n" ++ (helperToMuseApp lvls) ++ ""
 
 toMuseAppCodeWrapped :: String -> NestedCodeGraph -> String

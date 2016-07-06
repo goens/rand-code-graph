@@ -54,7 +54,7 @@ traceWith :: Show a => String -> a -> a
 traceWith msg a = trace (msg ++ " " ++ show a) a
 
 
-data CondBranch = CondBranch Graph.Node | CondNil deriving (Show, Eq)
+type CondBranch = Maybe Graph.Node
 
 newtype Depth = Depth Int deriving (Show, Eq, Ord) -- depth remaning (0 means can't spawn a function there)
 
@@ -133,7 +133,7 @@ lGraphLevelSort graph = [ lGraphGetLevel l graph | l <- levels ]
     levels = List.nub $ map snd topSort
 
 lGraphGetLevel :: Int -> LevelGraph -> [Graph.LNode Level]
-lGraphGetLevel lvl graph = subList lvl 
+lGraphGetLevel lvl graph = subList lvl
   where
     topSort = lGraphTopSort graph
     subList l = [ (node,l) | (node,l') <- topSort, l'==l]
@@ -146,7 +146,7 @@ cGraphLevelSort graph = [ cGraphGetLevel l graph | l <- levels ]
   where
     topSort = cGraphTopSort graph
     levels = List.sort . List.nub $ map getLevelCGN topSort
-                
+
 cGraphGetLevel :: Int -> CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
 cGraphGetLevel lvl graph = subList lvl
   where
@@ -271,9 +271,7 @@ elemWithProbList ((e,p):es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProbLi
 -- Conversion Functions
 ------------------------------------------------------------
 mkConditional :: [Maybe Graph.Node] -> ComputationType
-mkConditional (cond:true:false:_) = Conditional (mkCNode cond) (mkCNode true) (mkCNode false)
-    where mkCNode Nothing = CondNil
-          mkCNode (Just n) = CondBranch n
+mkConditional (cond:true:false:_) = Conditional cond true false
 mkConditional incompleteList = mkConditional (incompleteList ++ [Nothing])
 
 addLevelContext :: Level -> Graph.Context () b -> Graph.Context Level b

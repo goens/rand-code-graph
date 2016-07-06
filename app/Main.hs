@@ -34,6 +34,7 @@
 
 --import Debug.Trace (trace)
 import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph, CodeGraphNodeLabel(..),
+                              ComputationType(..),
                               makeCodeGraphRandomlyTimed,
                               makeNestedCodeGraphRandomlyTimed,
                               nodeToUniqueName, cgGetSubFunctions,
@@ -80,11 +81,25 @@ exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n]
 zipMon :: Monad m => m [a] -> [b] -> m [(a,b)] -- there is probably a std lib function for this
 zipMon as bs = liftM2 zip as $ return bs
 
+removeFuncs :: CodeGraph -> CodeGraph
+removeFuncs = Graph.nmap inner
+  where
+    inner label = label
+      { computationType =
+          case computationType label of
+            Map -> DataSource
+            NamedFunction _ -> OtherComputation
+            Function -> OtherComputation
+            a -> a
+      }
+
+
 generateSubGraphs :: forall m. (MonadRandom m, MonadState Int m) => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
 generateSubGraphs generatingFunction remainingDepth graph
     | remainingDepth <= 0 = do
       gs <- currentSubgraphs
-      return $ zip3 gs names arities
+      let sanitized = map removeFuncs gs
+      return $ zip3 sanitized names arities
     | otherwise = do
         gs <- currentSubgraphs -- :: [CodeGraph]
         listOfSubGraphs <-  mapM continueGenerating gs :: m [CodeSubGraphs]
@@ -97,7 +112,7 @@ generateSubGraphs generatingFunction remainingDepth graph
     names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes :: [String]
     arities = map (length . suc graph . fst) subnodes
     currentSubgraphs :: m [CodeGraph]
-    currentSubgraphs = mapM (\lnode -> generatingFunction (if remainingDepth <= 0 then [] else [1,length $ Graph.suc graph $ makeNode lnode])) subnodes >>= relabelNodes
+    currentSubgraphs = mapM (\lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]) subnodes >>= relabelNodes
     continueGenerating :: CodeGraph -> m CodeSubGraphs
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 

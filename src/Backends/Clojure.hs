@@ -20,10 +20,8 @@ cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel _ ctype t) =
         NamedFunction name -> "(" ++ name ++ (if null children then [] else " ") ++ childrenStr ++ ")"
         Function -> "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
         Map -> "(map ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
-        Conditional (CondBranch cond) trueBranch falseBranch ->
-          "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
-            where maybeNodeToUniqueName CondNil = "nil"
-                  maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
+        Conditional cond trueBranch falseBranch ->
+          "(if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ ")"
         Rename name -> name
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
@@ -32,25 +30,7 @@ cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel _ ctype t) =
 
 
 cgNodeToClojureAppFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToClojureAppFunction graph children (n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
-        DataSource -> "(get-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr  ++ ")"
-        SlowDataSource -> "(slow-get-data " ++ childrenStr ++ " \"service-name\" " ++ (show $ 10000 + timeout')  ++ ")"
-        OtherComputation -> "(compute " ++ childrenStr ++ " " ++ timeoutStr ++ ")"
-        NamedFunction name -> "(" ++ name ++ " " ++ childrenStr ++ " " ++ timeoutStr ++ ")"
-        SideEffect -> "(write-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr ++ ")"
-        Function -> "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
-        Map -> "(map ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
-        Conditional (CondBranch cond) trueBranch falseBranch ->
-            "(if " ++ nodeToUniqueName cond ++ " " ++ List.intercalate " " (map maybeNodeToUniqueName [trueBranch,falseBranch] ) ++ ")"
-          where
-              maybeNodeToUniqueName CondNil = "nil"
-              maybeNodeToUniqueName (CondBranch node) = nodeToUniqueName node
-        Rename name -> name
-  where
-    childrenStr = List.intercalate " " (map nodeToUniqueName children)
-    timeout' = fromMaybe n t
-    timeoutStr = show timeout'
+cgNodeToClojureAppFunction = cgNodeToClojureFunction
 
 
 cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
