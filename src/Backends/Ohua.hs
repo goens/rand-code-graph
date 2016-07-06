@@ -13,6 +13,31 @@ import qualified Data.Map.Strict            as Map
 import qualified Data.Tuple                 as Tuple
 import           Debug.Trace
 
+import           Data.Maybe           (fromMaybe)
+
+cgNodeToOhua  :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToOhua gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
+    case ctype of
+        Map -> "(smap ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
+        otherwise -> cgNodeToClojureFunction gr children labeledNode
+  where
+    childrenStr = List.intercalate " " (map nodeToUniqueName children)
+    timeout' = fromMaybe n t
+    timeoutStr = show timeout'
+
+-- TODO refactor: this is the very same function as above execpt that it dispatches to a different function to produce Clojure code
+cgNodeToOhuaApp :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToOhuaApp graph children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
+    case ctype of
+        Map -> "(smap ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
+        otherwise -> cgNodeToClojureAppFunction graph children labeledNode
+  where
+    childrenStr = List.intercalate " " (map nodeToUniqueName children)
+    timeout' = fromMaybe n t
+    timeoutStr = show timeout'
+
+toOhuaAlgorithms :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
+toOhuaAlgorithms toCode subGraphs = toClojureSubFunctions toCode subGraphs (toClojureSubFunctionHead "defalgo")
 
 cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToOhuaApplicative graph [] = ""
@@ -42,7 +67,7 @@ toOhuaAppCodeWrapped testname (graph, subgraphs) =
             if levelsCGraph graph == 1
                 then toOhuaAppCode graph
                 else "(let [" ++ toOhuaAppCode graph ++ ")"
-        subs = toClojureSubFunctions toAppCodeWrapped subgraphs
+        subs = toOhuaAlgorithms toAppCodeWrapped subgraphs
     in subs ++ "\n" ++ maingraph
 
 -- assumes the level graph is connected!
@@ -60,5 +85,5 @@ toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
 
 toOhuaCodeWrapped :: String -> NestedCodeGraph -> String
 toOhuaCodeWrapped testname (graph, subgraphs) =
-    toClojureSubFunctions toOhuaCode subgraphs
+    toOhuaAlgorithms toOhuaCode subgraphs
     ++ "\n" ++ "(defn " ++ testname ++ " []\n(ohua\n" ++ toOhuaCode graph ++ "))"
