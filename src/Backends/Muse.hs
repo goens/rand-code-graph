@@ -18,6 +18,7 @@ cgNodeToMuseFunction gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
         Conditional cond trueBranch falseBranch ->
           "(return (if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ "))"
+        Rename name -> "(return " ++ name ++ ")"
         otherwise -> cgNodeToClojureFunction gr children labeledNode
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
@@ -33,6 +34,7 @@ cgNodeToMuseAppFunction graph children labeledNode@(n,CodeGraphNodeLabel _ ctype
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
         Conditional cond trueBranch falseBranch ->
           "(return (if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ "))"
+        Rename name -> "(return " ++ name ++ ")"
         otherwise -> cgNodeToClojureAppFunction graph children labeledNode
   where
     timeout' = fromMaybe n t
@@ -57,7 +59,7 @@ toMuseMonadCode graph = helperToMuseCode nodes ++ "\n"
 
 cgNodesToMuseApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String
 cgNodesToMuseApplicative graph [] = ""
-cgNodesToMuseApplicative graph [node@(nd, _)] = "" ++ (cgNodeToClojureAppFunction graph (Graph.suc graph $ nd) node) ++ ""
+cgNodesToMuseApplicative graph [node@(nd, _)] = "" ++ (cgNodeToMuseAppFunction graph (Graph.suc graph $ nd) node) ++ ""
 cgNodesToMuseApplicative graph nodes = "(<$> clojure.core/vector "
                                 ++  (List.intercalate " " (map (\x -> toFun x $ Graph.suc graph $ fst x) nodes)) ++ ")"
     where
@@ -85,5 +87,9 @@ toMuseAppCodeWrapped testname (graph, subgraphs) =
     let maingraph = if (levelsCGraph graph == 1)
                     then "(defn " ++ testname ++ " [] (run!! \n" ++ toMuseAppCode graph ++ "))\n"
                     else "(defn " ++ testname ++ " [] (run!! \n (mlet [ " ++ toMuseAppCode graph ++ ")))\n"
-        subs = toClojureFunctions toMuseAppCode subgraphs
+        toAppCodeWrapped graph =
+            if levelsCGraph graph == 1
+                then toMuseAppCode graph
+                else "(mlet [" ++ toMuseAppCode graph ++ ")"
+        subs = toClojureFunctions toAppCodeWrapped subgraphs
     in subs ++ "\n" ++ maingraph
