@@ -25,16 +25,8 @@ cgNodeToOhua gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
     timeout' = fromMaybe n t
     timeoutStr = show timeout'
 
--- TODO refactor: this is the very same function as above execpt that it dispatches to a different function to produce Clojure code
 cgNodeToOhuaApp :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhuaApp graph children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
-        Map -> "(smap ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
-        otherwise -> cgNodeToClojureAppFunction graph children labeledNode
-  where
-    childrenStr = List.intercalate " " (map nodeToUniqueName children)
-    timeout' = fromMaybe n t
-    timeoutStr = show timeout'
+cgNodeToOhuaApp = cgNodeToOhua
 
 toOhuaAlgorithms :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
 toOhuaAlgorithms toCode subGraphs = toClojureSubFunctions toCode subGraphs (toClojureSubFunctionHead "defalgo")

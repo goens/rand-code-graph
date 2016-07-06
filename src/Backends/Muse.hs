@@ -27,9 +27,6 @@ cgNodeToMuseAppFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNod
 cgNodeToMuseAppFunction graph children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
     case ctype of
         OtherComputation -> "(<$> compute " ++ wrappedArgumentStr ++ ")"
-        NamedFunction name -> "(<$>"  ++ name ++ wrappedArgumentStr ++ ")"
---         NamedFunction name -> "(flat-map "  ++ name ++ wrappedArgumentStr ++ ")"
-        Function -> "(<$> ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
         -- FIXME
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
         otherwise -> cgNodeToClojureAppFunction graph children labeledNode
