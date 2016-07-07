@@ -57,6 +57,7 @@ import Data.Graph.Inductive as Graph
 import qualified Data.Map.Strict                                             as Map
 import Control.Monad.State.Class
 import Control.Monad.State.Strict (evalStateT)
+import Control.Monad.Random.Class (getRandom)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -117,12 +118,30 @@ generateSubGraphs generatingFunction remainingDepth graph
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 
 
+isFunc Function = True
+isFunc (NamedFunction _) = True
+isFunc _ = False
+
+
+
 randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 --randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
 randomExampleBenchmark weightMap typeWeights ifPercentage len = do
     gr <- mainGraph
     let (_, upper) = Graph.nodeRange gr
     subgr <- flip evalStateT upper $ generateSubGraphs generatingFunction 1 gr  -- TODO: make depth not hard-coded!
+    subgr <- flip mapM subgr $ \(graph, name, arity) -> do
+      let (_, upper) = Graph.nodeRange graph
+      parents <- case filter (not . isFunc . computationType . snd) $ Graph.labNodes graph of
+                    [] -> return []
+                    a -> do
+                      num <- getRandom
+                      return $ take (num `mod` 5 :: Int) $ cycle a
+      let ids = [succ upper..]
+      let newGr = foldr (\(id, (pid, CodeGraphNodeLabel l _ _)) -> Graph.insEdge (pid, id, ()) . insNode (id, CodeGraphNodeLabel (succ l) DataSource Nothing ) ) graph (zip ids parents)
+      return (newGr, name, arity)
+
+
     return (gr, subgr)
   where
     lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
