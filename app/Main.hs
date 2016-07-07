@@ -112,7 +112,7 @@ generateSubGraphs generatingFunction remainingDepth graph
     names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes :: [String]
     arities = map (length . suc graph . fst) subnodes
     currentSubgraphs :: m [CodeGraph]
-    currentSubgraphs = mapM (\lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]) subnodes >>= relabelNodes
+    currentSubgraphs = mapM (\lnode -> generatingFunction [2,3,2,length $ Graph.suc graph $ makeNode lnode]) subnodes >>= relabelNodes
     continueGenerating :: CodeGraph -> m CodeSubGraphs
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 
