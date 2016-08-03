@@ -1,6 +1,9 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DoAndIfThenElse #-}
-{-# LANGUAGE ScopedTypeVariables, ExplicitForAll, FlexibleContexts #-}
+{-# LANGUAGE DeriveDataTypeable  #-}
+{-# LANGUAGE DoAndIfThenElse     #-}
+{-# LANGUAGE ExplicitForAll      #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE LambdaCase          #-}
+{-# LANGUAGE ScopedTypeVariables, TupleSections #-}
 
 -- | Code for generating random level-graphs, a generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
@@ -33,31 +36,37 @@
 --   andres.goens@tu-dresden.de
 
 --import Debug.Trace (trace)
-import           LevelGraphs (CodeGraph, CodeSubGraphs, NestedCodeGraph, CodeGraphNodeLabel(..),
-                              ComputationType(..),
-                              makeCodeGraphRandomlyTimed,
-                              makeNestedCodeGraphRandomlyTimed,
-                              nodeToUniqueName, cgGetSubFunctions,
-                              makeCondCGWithProb, concatenateTests, listTests,
-                              genRandomCodeGraph, genRandomCodeGraphBigDS, traceWith)
-import           Backend (toCodeWrapped, acceptedLanguages)
-import           Control.Monad.Random (runRand, evalRand)
+import           Backend                    (acceptedLanguages, toCodeWrapped)
+import           Control.Arrow              (first, second)
 import           Control.Monad
-import qualified System.Random (mkStdGen, getStdGen, StdGen, random)
-import           Data.Traversable (mapAccumL)
-import           Data.Tuple (swap)
-import           Data.List (intercalate)
+import           Control.Monad              (liftM)
+import           Control.Monad.Random       (evalRand, runRand)
+import           Control.Monad.Random       (MonadRandom, fromList)
+import           Control.Monad.Random.Class (getRandom)
+import           Control.Monad.State.Class
+import           Control.Monad.State.Strict (evalStateT)
+import           Data.Graph.Inductive       as Graph
+import           Data.List                  (intercalate)
+import qualified Data.Map.Strict            as Map
+import           Data.Maybe                 (catMaybes, fromJust, fromMaybe,
+                                             isJust)
+import           Data.Traversable           (mapAccumL)
+import           Data.Tuple                 (swap)
 import           Data.Tuple.Sequence
+import           LevelGraphs                (CodeGraph, CodeGraphNodeLabel (..),
+                                             CodeSubGraphs,
+                                             ComputationType (..),
+                                             NestedCodeGraph, cgGetSubFunctions,
+                                             concatenateTests,
+                                             genRandomCodeGraph,
+                                             genRandomCodeGraphBigDS, listTests,
+                                             makeCodeGraphRandomlyTimed,
+                                             makeCondCGWithProb,
+                                             makeNestedCodeGraphRandomlyTimed,
+                                             nodeToUniqueName, traceWith)
 import           System.Console.CmdArgs
-import           Control.Arrow (first, second)
-import           Data.Maybe (fromMaybe,fromJust,isJust, catMaybes)
-import           Control.Monad.Random (MonadRandom,fromList)
-import           Control.Monad (liftM)
-import Data.Graph.Inductive as Graph
-import qualified Data.Map.Strict                                             as Map
-import Control.Monad.State.Class
-import Control.Monad.State.Strict (evalStateT)
-import Control.Monad.Random.Class (getRandom)
+import qualified System.Random              (StdGen, getStdGen, mkStdGen,
+                                             random)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -111,17 +120,48 @@ generateSubGraphs generatingFunction remainingDepth graph
     subnodes = cgGetSubFunctions graph
     makeNode = fst
     names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes :: [String]
-    arities = map (length . suc graph . fst) subnodes
+    arities = map (calculateArity graph) subnodes
     currentSubgraphs :: m [CodeGraph]
     currentSubgraphs = mapM (\lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]) subnodes >>= relabelNodes
     continueGenerating :: CodeGraph -> m CodeSubGraphs
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 
 
+calculateArity :: CodeGraph -> LNode CodeGraphNodeLabel -> Int
+calculateArity _ (_, CodeGraphNodeLabel _ Map _) = 1
+calculateArity graph (a, _) = length $ suc graph a
+
+
 isFunc Function = True
 isFunc (NamedFunction _) = True
+isFunc Map = True
 isFunc _ = False
 
+
+liftedUfold :: (Graph gr, Monad m) => (Context a b -> c -> m c) -> c -> gr a b -> m c
+liftedUfold f u g
+  | isEmpty g = return u
+  | otherwise = liftedUfold f u g' >>= f c
+  where
+    (c,g') = matchAny g
+
+
+liftedGmap :: (DynGraph gr, Monad m) => (Context a b -> m (Context c d)) -> gr a b -> m (gr c d)
+liftedGmap f = liftedUfold (\c gr -> (Graph.& gr) <$> f c) empty
+
+
+liftedNmap :: (DynGraph gr, Monad m) => (a -> m c) -> gr a b -> m (gr c b)
+liftedNmap f = liftedGmap (\(p,v,l,s)->(p,v,,s) <$> f l)
+
+liftedEmap :: (DynGraph gr, Monad m) => (b -> m c) -> gr a b -> m (gr a c)
+liftedEmap f = liftedGmap (\(p,v,l,s)-> (,v,l,) <$> map1 f p <*> map1 f s)
+  where
+    map1 g = mapM (\(a, b) -> (, b) <$> g a)
+
+liftedNEmap :: (DynGraph gr, Monad m) => (a -> m c) -> (b -> m d) -> gr a b -> m (gr c d)
+liftedNEmap fn fe = liftedGmap (\(p,v,l,s) -> (,v,,) <$> fe' p <*> fn l <*> fe' s)
+  where
+    fe' = mapM (\(a, b) -> (, b) <$> fe a)
 
 
 randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
@@ -151,8 +191,21 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len = do
     -- concrete monad, since this is bound once in MonadRandom m and the StateT
     -- wrapped monad.
     generatingFunction :: MonadRandom m => [Int] -> m CodeGraph
-    generatingFunction = genRandomCodeGraph weightMap typeWeights >=> makeCondCGWithProb ifPercentage
+    generatingFunction = genRandomCodeGraph weightMap typeWeights >=> makeCondCGWithProb ifPercentage >=> removeEmptyMaps -- HACK
+                                                                                                                          -- Eventually the backend should either not generate maps on functions with no sucessors
+                                                                                                                          -- OR ohua fixes its handling of empty vectors ;)
     mainGraph = lvllist >>= generatingFunction
+
+
+removeEmptyMaps :: MonadRandom m => CodeGraph -> m CodeGraph
+removeEmptyMaps graph = liftedGmap (\(a, nodeId, label, b) -> (a,nodeId,,b) <$> f nodeId label) graph
+  where
+    f nodeId label =
+      case computationType label of
+        Map | length (suc graph nodeId) == 0 -> do
+          num <- getRandom
+          return $ label { computationType = [OtherComputation, DataSource] !! (num `mod` 2 :: Int) }
+        _ -> return label
 
 
 randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
@@ -212,20 +265,20 @@ genExampleBenchmark
 -- Command-Line Arguments Parsing
 ------------------------------------------------------------
 
-data LGCmdArgs = LGCmdArgs {output :: String,
-                            levels :: Int,
-                            totalGraphs :: Int,
-                            language :: String,
-                            seed :: Int,
-                            maxDepth :: Int,
+data LGCmdArgs = LGCmdArgs {output            :: String,
+                            levels            :: Int,
+                            totalGraphs       :: Int,
+                            language          :: String,
+                            seed              :: Int,
+                            maxDepth          :: Int,
                             percentageSources :: Double,
-                            percentageSinks :: Double,
-                            percentageFuns :: Double,
-                            percentageMaps :: Double,
-                            percentageIfs :: Double,
-                            slowdatasource :: Bool,
-                            cachenum :: Maybe Int,
-                            preamble :: Maybe FilePath
+                            percentageSinks   :: Double,
+                            percentageFuns    :: Double,
+                            percentageMaps    :: Double,
+                            percentageIfs     :: Double,
+                            slowdatasource    :: Bool,
+                            cachenum          :: Maybe Int,
+                            preamble          :: Maybe FilePath
                            } deriving (Show, Data, Typeable)
 
 lgCmdArgs :: LGCmdArgs
