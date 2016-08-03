@@ -21,7 +21,7 @@ cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
         OtherComputation -> "compute " ++ timeoutChildrenList
         NamedFunction name ->  name ++ " " ++ paramList
         Function -> "ifn" ++ nodeToUniqueName n ++ " "  ++ paramList
-        Map -> "map ifn" ++ nodeToUniqueName n ++ " " ++ timeoutChildrenList
+        Map -> "fmap length (mapM ifn" ++ nodeToUniqueName n ++ " " ++ timeoutChildrenList ++ ")"
         SideEffect -> "writeData \"service-name\" " ++ timeoutChildrenList
         Conditional cond trueBranch falseBranch ->
             "return (if " ++ maybe "True" ( (++ " == 0") . nodeToUniqueName) cond ++ " then " ++ f trueBranch ++ " else " ++ f falseBranch ++ ")"

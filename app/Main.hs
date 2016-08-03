@@ -3,7 +3,8 @@
 {-# LANGUAGE ExplicitForAll      #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE LambdaCase          #-}
-{-# LANGUAGE ScopedTypeVariables, TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections       #-}
 
 -- | Code for generating random level-graphs, a generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
@@ -53,7 +54,8 @@ import           Data.Maybe                 (catMaybes, fromJust, fromMaybe,
 import           Data.Traversable           (mapAccumL)
 import           Data.Tuple                 (swap)
 import           Data.Tuple.Sequence
-import           LevelGraphs                (CodeGraph, CodeGraphNodeLabel (..),
+import           LevelGraphs                (Arity, CodeGraph,
+                                             CodeGraphNodeLabel (..),
                                              CodeSubGraphs,
                                              ComputationType (..),
                                              NestedCodeGraph, cgGetSubFunctions,
@@ -89,7 +91,7 @@ exampleMapUpTo :: Int -> Map.Map (Int,Int) Double
 exampleMapUpTo n = Map.fromList [ ((a,b), (1 / 2^(b-a))) | a<- [1..n], b<-[1..n], a<b]
 
 zipMon :: Monad m => m [a] -> [b] -> m [(a,b)] -- there is probably a std lib function for this
-zipMon as bs = liftM2 zip as $ return bs
+zipMon as bs = liftM2 zip as $ return bs       -- There isn't but there's this, much cleaner, implementation
 
 removeFuncs :: CodeGraph -> CodeGraph
 removeFuncs = Graph.nmap inner
@@ -104,30 +106,33 @@ removeFuncs = Graph.nmap inner
       }
 
 
-generateSubGraphs :: forall m. (MonadRandom m, MonadState Int m) => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
+generateSubGraphs :: (MonadRandom m, MonadState Int m) => ([Int] -> m CodeGraph) -> Int -> CodeGraph -> m CodeSubGraphs
 generateSubGraphs generatingFunction remainingDepth graph
     | remainingDepth <= 0 = do
       gs <- currentSubgraphs
       let sanitized = map removeFuncs gs
       return $ zip3 sanitized names arities
     | otherwise = do
-        gs <- currentSubgraphs -- :: [CodeGraph]
-        listOfSubGraphs <-  mapM continueGenerating gs :: m [CodeSubGraphs]
+        gs <- currentSubgraphs
+        listOfSubGraphs <-  mapM continueGenerating gs
         let oneSubGraphs = concat listOfSubGraphs
-        return $ zip3 gs names arities ++ oneSubGraphs :: m CodeSubGraphs
+        return $ zip3 gs names arities ++ oneSubGraphs
 -- I probably will run into a name clash here. Either give them different unique names or find a way to nest the contexts in the backend
+-- DONE: By renaming all subgraph nodes, see the hack below
   where
     subnodes = cgGetSubFunctions graph
     makeNode = fst
-    names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes :: [String]
+    names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes
     arities = map (calculateArity graph) subnodes
-    currentSubgraphs :: m [CodeGraph]
-    currentSubgraphs = mapM (\lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]) subnodes >>= relabelNodes
-    continueGenerating :: CodeGraph -> m CodeSubGraphs
+    currentSubgraphs =
+      mapM (\lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]) subnodes
+      >>= relabelNodes -- HACK: A dirt hack to handle name clashes
+                       -- It'd be much better if there was a way to tell the backend which ids not to use
+                       -- and/or where to start counting from
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 
 
-calculateArity :: CodeGraph -> LNode CodeGraphNodeLabel -> Int
+calculateArity :: CodeGraph -> LNode CodeGraphNodeLabel -> Arity
 calculateArity _ (_, CodeGraphNodeLabel _ Map _) = 1
 calculateArity graph (a, _) = length $ suc graph a
 
@@ -138,30 +143,16 @@ isFunc Map = True
 isFunc _ = False
 
 
-liftedUfold :: (Graph gr, Monad m) => (Context a b -> c -> m c) -> c -> gr a b -> m c
-liftedUfold f u g
+gufoldM :: (Graph gr, Monad m) => (Context a b -> c -> m c) -> c -> gr a b -> m c
+gufoldM f u g
   | isEmpty g = return u
-  | otherwise = liftedUfold f u g' >>= f c
+  | otherwise = gufoldM f u g' >>= f c
   where
     (c,g') = matchAny g
 
 
-liftedGmap :: (DynGraph gr, Monad m) => (Context a b -> m (Context c d)) -> gr a b -> m (gr c d)
-liftedGmap f = liftedUfold (\c gr -> (Graph.& gr) <$> f c) empty
-
-
-liftedNmap :: (DynGraph gr, Monad m) => (a -> m c) -> gr a b -> m (gr c b)
-liftedNmap f = liftedGmap (\(p,v,l,s)->(p,v,,s) <$> f l)
-
-liftedEmap :: (DynGraph gr, Monad m) => (b -> m c) -> gr a b -> m (gr a c)
-liftedEmap f = liftedGmap (\(p,v,l,s)-> (,v,l,) <$> map1 f p <*> map1 f s)
-  where
-    map1 g = mapM (\(a, b) -> (, b) <$> g a)
-
-liftedNEmap :: (DynGraph gr, Monad m) => (a -> m c) -> (b -> m d) -> gr a b -> m (gr c d)
-liftedNEmap fn fe = liftedGmap (\(p,v,l,s) -> (,v,,) <$> fe' p <*> fn l <*> fe' s)
-  where
-    fe' = mapM (\(a, b) -> (, b) <$> fe a)
+ggmapM :: (DynGraph gr, Monad m) => (Context a b -> m (Context c d)) -> gr a b -> m (gr c d)
+ggmapM f = gufoldM (\c gr -> (Graph.& gr) <$> f c) empty
 
 
 randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
@@ -191,14 +182,17 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len = do
     -- concrete monad, since this is bound once in MonadRandom m and the StateT
     -- wrapped monad.
     generatingFunction :: MonadRandom m => [Int] -> m CodeGraph
-    generatingFunction = genRandomCodeGraph weightMap typeWeights >=> makeCondCGWithProb ifPercentage >=> removeEmptyMaps -- HACK
-                                                                                                                          -- Eventually the backend should either not generate maps on functions with no sucessors
-                                                                                                                          -- OR ohua fixes its handling of empty vectors ;)
+    generatingFunction =
+      genRandomCodeGraph weightMap typeWeights
+      >=> makeCondCGWithProb ifPercentage
+      >=> removeEmptyMaps -- HACK
+                          -- Eventually the backend should either not generate maps on functions with no sucessors
+                          -- OR ohua fixes its handling of empty vectors :P
     mainGraph = lvllist >>= generatingFunction
 
 
 removeEmptyMaps :: MonadRandom m => CodeGraph -> m CodeGraph
-removeEmptyMaps graph = liftedGmap (\(a, nodeId, label, b) -> (a,nodeId,,b) <$> f nodeId label) graph
+removeEmptyMaps graph = ggmapM (\(a, nodeId, label, b) -> (a,nodeId,,b) <$> f nodeId label) graph
   where
     f nodeId label =
       case computationType label of

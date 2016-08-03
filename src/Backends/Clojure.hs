@@ -19,7 +19,7 @@ cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel _ ctype t) =
         SideEffect -> "(write-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr ++ ")"
         NamedFunction name -> "(" ++ name ++ (if null children then [] else " ") ++ childrenStr ++ ")"
         Function -> "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
-        Map -> "(map ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
+        Map -> "(count (map ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ "))"
         Conditional cond trueBranch falseBranch ->
           "(if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ ")"
         Rename name -> name

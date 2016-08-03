@@ -18,7 +18,7 @@ import           Data.Maybe           (fromMaybe)
 cgNodeToOhua  :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToOhua gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
     case ctype of
-        Map -> "(smap ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ ")"
+        Map -> "(count (smap ifn" ++ nodeToUniqueName n ++ " (mvector " ++ childrenStr ++ ") " ++ "))"
         otherwise -> cgNodeToClojureFunction gr children labeledNode
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
@@ -66,13 +66,18 @@ toOhuaAppCodeWrapped testname (graph, subgraphs) =
 -- assumes the lowest level has exactly one element!
 -- (otherwise there is no call in the end)
 
+
+cgNodeToOhuaLetDef :: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
+cgNodeToOhuaLetDef graph x@(x1,_) = nodeToUniqueName x1 ++ " " ++ cgNodeToOhua graph (Graph.suc graph x1) x
+
+
 toOhuaCode :: CodeGraph -> String
 toOhuaCode graph = helperToOhuaCode nodes ++ "\n"
     where
       nodes = reverse $ cGraphLevelSort graph --bottom up
-      levelToOhua levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToClojureLetDef toOhuaCode graph) levelNodes) ++ "]"
+      levelToOhua levelNodes = "let [" ++ List.intercalate " " (map (cgNodeToOhuaLetDef graph) levelNodes) ++ "]"
       helperToOhuaCode [] = ""
-      helperToOhuaCode [[lastLvlNode]] = cgNodeToClojureFunction graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
+      helperToOhuaCode [[lastLvlNode]] = cgNodeToOhua graph (Graph.suc graph $ fst lastLvlNode) lastLvlNode ++ "\n"
       helperToOhuaCode (lvl:lvls) = "(" ++ (levelToOhua lvl) ++ "\n" ++ (helperToOhuaCode lvls) ++ ")"
 
 toOhuaCodeWrapped :: String -> NestedCodeGraph -> String
