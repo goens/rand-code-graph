@@ -196,7 +196,7 @@ removeEmptyMaps graph = ggmapM (\(a, nodeId, label, b) -> (a,nodeId,,b) <$> f no
   where
     f nodeId label =
       case computationType label of
-        Map | length (suc graph nodeId) == 0 -> do
+        Map | length (suc graph nodeId) < 2 -> do
           num <- getRandom
           return $ label { computationType = [OtherComputation, DataSource] !! (num `mod` 2 :: Int) }
         _ -> return label
