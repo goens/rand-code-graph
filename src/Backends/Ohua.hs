@@ -13,22 +13,22 @@ import qualified Data.Map.Strict            as Map
 import qualified Data.Tuple                 as Tuple
 import           Debug.Trace
 
-import           Data.Maybe           (fromMaybe)
+import           Data.Maybe                 (fromMaybe)
 
 cgNodeToOhua  :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToOhua gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
+cgNodeToOhua gr children labeledNode@(n,label) =
+    case computationType label of
         Map -> "(count (smap ifn" ++ nodeToUniqueName n ++ " (mvector " ++ childrenStr ++ ") " ++ "))"
         otherwise -> cgNodeToClojureFunction gr children labeledNode
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
-    timeout' = fromMaybe n t
+    timeout' = fromMaybe n (timeout label)
     timeoutStr = show timeout'
 
 cgNodeToOhuaApp :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToOhuaApp = cgNodeToOhua
 
-toOhuaAlgorithms :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
+toOhuaAlgorithms :: (CodeGraph -> String) -> [FunctionGraph] -> String
 toOhuaAlgorithms toCode subGraphs = toClojureSubFunctions toCode subGraphs (toClojureSubFunctionHead "defalgo")
 
 cgNodesToOhuaApplicative :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel] -> String

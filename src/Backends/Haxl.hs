@@ -1,9 +1,9 @@
 module Backends.Haxl where
 
-import LevelGraphs
+import           LevelGraphs
 
+import           Backends.Haskell
 import qualified Data.Graph.Inductive as Graph
-import Backends.Haskell
 
 import           Data.Maybe           (fromMaybe)
 

@@ -1,14 +1,17 @@
 module Backend where
 
-import LevelGraphs (NestedCodeGraph)
+import           LevelGraphs          (FunctionMeta (..), NestedCodeGraph)
 
 import qualified Data.Graph.Inductive as Graph
 
 -- TODO: a more general mechanism is needed here that should take this configuration from the command line. -> API-design.
-import Backends.Ohua        (toOhuaAppCodeWrapped, toOhuaCodeWrapped)
-import Backends.Haxl        (toHaxlDoCodeWrapped, toHaxlDoAppCodeWrapped)
-import Backends.Muse        (toMuseMonadCodeWrapped, toMuseAppCodeWrapped)
-import qualified Data.Map as Map
+import qualified Backends.Common
+import           Backends.Haxl        (toHaxlDoAppCodeWrapped,
+                                       toHaxlDoCodeWrapped)
+import           Backends.Muse        (toMuseAppCodeWrapped,
+                                       toMuseMonadCodeWrapped)
+import           Backends.Ohua        (toOhuaAppCodeWrapped, toOhuaCodeWrapped)
+import qualified Data.Map             as Map
 
 ------------------------------------------------------------
 -- General Backend
@@ -40,4 +43,7 @@ toCodeWrapped = maybe (\_ _ -> "Unexpected language case error") snd . flip Map.
 toGraphCodeWrapped :: String -> NestedCodeGraph -> String
 toGraphCodeWrapped name (graph, subgraphs) =
     "Graph-" ++ name ++ "\n" ++ Graph.prettify graph ++ "\n" ++
-    (concatMap (\(subgraph,_, _) -> "Subgraph-" ++ name ++ "\n" ++ Graph.prettify subgraph ++ "\n") subgraphs)
+    (concatMap (\FunctionMeta{fn=subgraph} -> "Subgraph-" ++ name ++ "\n" ++ Graph.prettify subgraph ++ "\n") subgraphs)
+
+
+inlineIfBranches = Backends.Common.inlineIfBranches

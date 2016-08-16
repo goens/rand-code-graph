@@ -37,7 +37,8 @@
 --   andres.goens@tu-dresden.de
 
 --import Debug.Trace (trace)
-import           Backend                    (acceptedLanguages, toCodeWrapped)
+import           Backend                    (acceptedLanguages,
+                                             inlineIfBranches, toCodeWrapped)
 import           Control.Arrow              (first, second)
 import           Control.Monad
 import           Control.Monad              (liftM)
@@ -47,6 +48,7 @@ import           Control.Monad.Random.Class (getRandom)
 import           Control.Monad.State.Class
 import           Control.Monad.State.Strict (evalStateT)
 import           Data.Graph.Inductive       as Graph
+import           Data.IORef
 import           Data.List                  (intercalate)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (catMaybes, fromJust, fromMaybe,
@@ -58,10 +60,12 @@ import           LevelGraphs                (Arity, CodeGraph,
                                              CodeGraphNodeLabel (..),
                                              CodeSubGraphs,
                                              ComputationType (..),
-                                             NestedCodeGraph, cgGetSubFunctions,
+                                             FunctionMeta (..), NestedCodeGraph,
+                                             cgGetSubFunctions,
                                              concatenateTests,
                                              genRandomCodeGraph,
-                                             genRandomCodeGraphBigDS, listTests,
+                                             genRandomCodeGraphBigDS,
+                                             isFunctionNode, listTests,
                                              makeCodeGraphRandomlyTimed,
                                              makeCondCGWithProb,
                                              makeNestedCodeGraphRandomlyTimed,
@@ -111,36 +115,50 @@ generateSubGraphs generatingFunction remainingDepth graph
     | remainingDepth <= 0 = do
       gs <- currentSubgraphs
       let sanitized = map removeFuncs gs
-      return $ zip3 sanitized names arities
+      return $ zipWith (\gen gr -> gen {fn=gr}) functionGens sanitized
     | otherwise = do
         gs <- currentSubgraphs
-        listOfSubGraphs <-  mapM continueGenerating gs
+        listOfSubGraphs <- mapM continueGenerating gs
         let oneSubGraphs = concat listOfSubGraphs
-        return $ zip3 gs names arities ++ oneSubGraphs
+        return $ zipWith (\gen gr -> gen {fn=gr}) functionGens gs ++ oneSubGraphs
 -- I probably will run into a name clash here. Either give them different unique names or find a way to nest the contexts in the backend
 -- DONE: By renaming all subgraph nodes, see the hack below
   where
     subnodes = cgGetSubFunctions graph
-    makeNode = fst
-    names = map (\s -> "ifn" ++ (nodeToUniqueName $ makeNode s)) subnodes
-    arities = map (calculateArity graph) subnodes
+    functionGens = concatMap (\lnode@(node, label) ->
+        let uname = nodeToUniqueName node
+            gen = generatingFunction [1,length $ Graph.suc graph node]
+            arity = calculateArity graph lnode
+            mfn = FunctionMeta{fn=gen, fnArity=arity, fnIsMapped=isMapOp label}
+        in if isConditional label
+              then [ mfn {fnName="ifnthen" ++ uname}
+                   , mfn {fnName="ifnelse" ++ uname}
+                   ]
+              else [ mfn {fnName="ifn" ++ uname} ]
+            ) subnodes
     currentSubgraphs =
-      mapM (\lnode -> generatingFunction [1,length $ Graph.suc graph $ makeNode lnode]) subnodes
+      sequence (map fn functionGens)
       >>= relabelNodes -- HACK: A dirt hack to handle name clashes
                        -- It'd be much better if there was a way to tell the backend which ids not to use
                        -- and/or where to start counting from
     continueGenerating = generateSubGraphs generatingFunction (remainingDepth - 1)
 
 
+isConditional :: CodeGraphNodeLabel -> Bool
+isConditional = go . computationType
+  where go Conditional{} = True
+        go _ = False
+
+
+isMapOp :: CodeGraphNodeLabel -> Bool
+isMapOp = go . computationType
+  where go Map = True
+        go _ = False
+
+
 calculateArity :: CodeGraph -> LNode CodeGraphNodeLabel -> Arity
-calculateArity _ (_, CodeGraphNodeLabel _ Map _) = 1
+calculateArity _ (_, CodeGraphNodeLabel _ Map _ _) = 1
 calculateArity graph (a, _) = length $ suc graph a
-
-
-isFunc Function = True
-isFunc (NamedFunction _) = True
-isFunc Map = True
-isFunc _ = False
 
 
 gufoldM :: (Graph gr, Monad m) => (Context a b -> c -> m c) -> c -> gr a b -> m c
@@ -155,22 +173,23 @@ ggmapM :: (DynGraph gr, Monad m) => (Context a b -> m (Context c d)) -> gr a b -
 ggmapM f = gufoldM (\c gr -> (Graph.& gr) <$> f c) empty
 
 
-randomExampleBenchmark :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
+randomExampleBenchmark :: MonadRandom m => Bool -> Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 --randomExampleBenchmark weightMap typeWeights ifPercentage len | trace ("randomExampleBenchmark, typeweigths: " ++ show typeWeights ++ ", ifpercentage: " ++ show ifPercentage ++ ", len: " ++ show len ++ "\n") False = undefined
-randomExampleBenchmark weightMap typeWeights ifPercentage len = do
+randomExampleBenchmark withBigDS weightMap typeWeights ifPercentage len = do
     gr <- mainGraph
     let (_, upper) = Graph.nodeRange gr
     subgr <- flip evalStateT upper $ generateSubGraphs generatingFunction 1 gr  -- TODO: make depth not hard-coded!
-    subgr <- flip mapM subgr $ \(graph, name, arity) -> do
+    subgr <- flip mapM subgr $ \subgraph -> do
+      let graph = fn subgraph
       let (_, upper) = Graph.nodeRange graph
-      parents <- case filter (not . isFunc . computationType . snd) $ Graph.labNodes graph of
+      parents <- case filter (not . isFunctionNode . snd) $ Graph.labNodes graph of
                     [] -> return []
                     a -> do
                       num <- getRandom
                       return $ take (num `mod` 5 :: Int) $ cycle a
       let ids = [succ upper..]
-      let newGr = foldr (\(id, (pid, CodeGraphNodeLabel l _ _)) -> Graph.insEdge (pid, id, ()) . insNode (id, CodeGraphNodeLabel (succ l) DataSource Nothing ) ) graph (zip ids parents)
-      return (newGr, name, arity)
+      let newGr = foldr (\(id, (pid, label)) -> Graph.insEdge (pid, id, ()) . insNode (id, CodeGraphNodeLabel (succ $ LevelGraphs.level label) DataSource Nothing Nothing) ) graph (zip ids parents)
+      return $ subgraph {fn =newGr}
 
 
     return (gr, subgr)
@@ -181,9 +200,13 @@ randomExampleBenchmark weightMap typeWeights ifPercentage len = do
     -- This type signature is necessary to make the return independant of the
     -- concrete monad, since this is bound once in MonadRandom m and the StateT
     -- wrapped monad.
+    genGraph :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
+    genGraph
+        | withBigDS = genRandomCodeGraphBigDS
+        | otherwise = genRandomCodeGraph
     generatingFunction :: MonadRandom m => [Int] -> m CodeGraph
     generatingFunction =
-      genRandomCodeGraph weightMap typeWeights
+      genGraph weightMap typeWeights
       >=> makeCondCGWithProb ifPercentage
       >=> removeEmptyMaps -- HACK
                           -- Eventually the backend should either not generate maps on functions with no sucessors
@@ -236,9 +259,7 @@ genExampleBenchmark
     typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
     concatenateFun = concatenateTests
     randomBenchmark' :: MonadRandom m => Int -> m NestedCodeGraph
-    randomBenchmark' lvl
-        | slowDS = randomExampleBenchmarkBDS weightMap typeWeights ifPercentage lvl
-        | otherwise = randomExampleBenchmark weightMap typeWeights ifPercentage lvl
+    randomBenchmark' lvl = randomExampleBenchmark slowDS weightMap typeWeights ifPercentage lvl
 
     randomBenchmark :: System.Random.StdGen -> Int -> (NestedCodeGraph, System.Random.StdGen)
     randomBenchmark gen lvl
@@ -272,7 +293,8 @@ data LGCmdArgs = LGCmdArgs {output            :: String,
                             percentageIfs     :: Double,
                             slowdatasource    :: Bool,
                             cachenum          :: Maybe Int,
-                            preamble          :: Maybe FilePath
+                            preamble          :: Maybe FilePath,
+                            inlineIf          :: Bool
                            } deriving (Show, Data, Typeable)
 
 lgCmdArgs :: LGCmdArgs
@@ -291,6 +313,7 @@ lgCmdArgs = LGCmdArgs
     , preamble = def &= name "p" &= help "Prepend some code to the generated code."
     , cachenum = Nothing &= name "c" &= help "Make a results that are cachable. Will generate from c possible requests. If flag is not present, caching is off. In this case all requests are different."
     , slowdatasource = False &= name "S" &= help "Include a slow data source at one side."
+    , inlineIf = False &= name "i"
     } &= summary "Level-graphs: generates random level graphs, v-0.1.0.0"
 
 
@@ -370,6 +393,8 @@ main = do
   else
       do
         -- Main execution branch
+
+        writeIORef inlineIfBranches (inlineIf lgArgs)
 
         randSeed <- if (seed lgArgs) == (-1)
                         then do

@@ -1,34 +1,68 @@
 module Backends.Haskell where
 
-import LevelGraphs
 import           Data.Maybe           (fromMaybe)
+import           LevelGraphs
 
 import qualified Data.Graph.Inductive as Graph
 
+import           Backends.Common
 import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple
+import           Text.Printf
+
 
 helperNodeToHaskellFunction :: [Graph.Node] -> String
 helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map nodeToUniqueName children)
     where listStart = if null children then "" else ", "
 
 cgNodeToHaskellFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
-        DataSource -> "getData \"service-name\" " ++ timeoutChildrenList
-        SlowDataSource -> "slowGetData \"service-name\" " ++ listWTimeout (show $ 10000 + timeout')
+cgNodeToHaskellFunction children (n,label) =
+    case computationType label of
+        DataSource ->
+          printf
+            "getData \"service-name\" (%d : %s ++ [%s])"
+            timeout'
+            (fromMaybe "[]" $ mapIndex label)
+            (List.intercalate ", " $ map nodeToUniqueName children)
+        SlowDataSource ->
+          printf
+            "slowGetData \"service-name\" (%d : %s [%s])"
+            (10000 + timeout')
+            (fromMaybe "[]" $ mapIndex label)
+            (List.intercalate ", " $ map nodeToUniqueName children)
         OtherComputation -> "compute " ++ timeoutChildrenList
         NamedFunction name ->  name ++ " " ++ paramList
         Function -> "ifn" ++ nodeToUniqueName n ++ " "  ++ paramList
-        Map -> "fmap length (mapM ifn" ++ nodeToUniqueName n ++ " " ++ timeoutChildrenList ++ ")"
+        Map ->
+          printf
+            "fmap length (mapM (uncurry ifn%s) [%s])"
+            (nodeToUniqueName n)
+            (List.intercalate ", " l)
+          where l = [ "(" ++ maybe "" (++ " ++ ") (mapIndex label) ++ "[" ++ show index ++ "]" ++ ", " ++ val ++ ")"
+                    | (index, val) <- zip [0..] (timeoutStr : map nodeToUniqueName children)
+                    ]
         SideEffect -> "writeData \"service-name\" " ++ timeoutChildrenList
-        Conditional cond trueBranch falseBranch ->
-            "return (if " ++ maybe "True" ( (++ " == 0") . nodeToUniqueName) cond ++ " then " ++ f trueBranch ++ " else " ++ f falseBranch ++ ")"
-          where f = maybe "0" nodeToUniqueName
+        Conditional cond _ _ ->
+            if shouldInlineIfBranches undefined
+                then printf "(if %s then %s else %s)" condBr callThen callElse
+                else
+                  printf
+                    "(do {(%s, %s) <- (,) <$> %s <*> %s; return (if %s then %s else %s)})"
+                    thenTemp elseTemp
+                    callThen callElse
+                    condBr
+                    thenTemp elseTemp
+          where
+            thenTemp = "then" ++ nodeToUniqueName n
+            elseTemp = "else" ++ nodeToUniqueName n
+            condBr = maybe "True" ( (++ " == 1") . nodeToUniqueName) cond
+            callFn prefix = "ifn" ++ prefix ++ nodeToUniqueName n ++ " " ++ paramList
+            callThen = callFn "then"
+            callElse = callFn "else"
         Rename name -> "return " ++ name
   where
-    timeout' = fromMaybe n t
+    timeout' = fromMaybe n (timeout label)
     timeoutStr = show timeout'
     listWTimeout t = "[" ++ List.intercalate ", " (t: map nodeToUniqueName children) ++ "]"
     paramList = List.intercalate " " (map nodeToUniqueName children)
@@ -45,23 +79,30 @@ toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
       helperToHaskellDoCode ns = (concatMap (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueName (fst $ last ns) ++ "\n"
 
 
-toHaskellSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
+toHaskellSubFunctions :: (CodeGraph -> String) -> CodeSubGraphs -> String
 toHaskellSubFunctions _ [] = ""
 toHaskellSubFunctions toCode subgraphs = List.intercalate "\n" $ map (toHaskellSubFunction toCode) $ reverse subgraphs
 
-toHaskellSubFunction :: (CodeGraph -> String) -> (CodeGraph, FnName, Arity) -> String
+toHaskellSubFunction :: (CodeGraph -> String) -> FunctionGraph -> String
 toHaskellSubFunction toCode namedgr =
     let
         (head, transformedGraph) = toHaskellSubFunctionHead namedgr
     in head ++ toCode transformedGraph
 
-toHaskellSubFunctionHead :: (CodeGraph, String, Arity) -> (String, CodeGraph)
-toHaskellSubFunctionHead (graph, name, arity) =
+toHaskellSubFunctionHead :: FunctionGraph -> (String, CodeGraph)
+toHaskellSubFunctionHead FunctionMeta{fn=graph, fnName=name, fnArity=arity, fnIsMapped=mapped} =
     let
-        parameterNamesList =  map (\x -> "parameter_" ++ show x) [1..arity]
-        paramTypes = List.replicate arity "Int"
-        typeSignature = name ++ "::" ++ List.intercalate " -> " (paramTypes ++ ["GenHaxl u Int"])
-        parameterNames = List.intercalate " " parameterNamesList
-        transformedGraph = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
+        parameterNamesList = map (\x -> "parameter_" ++ show x) [1..arity]
+
+        paramTypes
+          | mapped = " [Int] " : bl
+          | otherwise = bl
+          where bl = List.replicate arity "Int"
+        typeSignature = name ++ ":: " ++ List.intercalate " -> " (paramTypes ++ ["GenHaxl u Int"])
+        parameterNames = List.intercalate " "$ if mapped then "mapIndex" : parameterNamesList else parameterNamesList
+        transformedGraph
+          | mapped = Graph.nmap (\l -> l {mapIndex=Just "mapIndex"}) g
+          | otherwise = g
+          where g = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
         head = typeSignature ++ "\n" ++ name ++ " " ++ parameterNames ++ " = do\n"
     in (head, transformedGraph)

@@ -53,6 +53,7 @@ library
                  , Backends.Haxl
                  , Backends.Clojure
                  , Backends.Muse
+                 , Backends.Common
   build-depends:       base,
                        MonadRandom,
                        random,

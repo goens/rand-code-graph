@@ -1,7 +1,7 @@
 module Backends.Muse where
 
-import LevelGraphs
-import Backends.Clojure
+import           Backends.Clojure
+import           LevelGraphs
 
 import           Data.Maybe           (fromMaybe)
 
@@ -12,8 +12,8 @@ import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple
 
 cgNodeToMuseFunction  :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToMuseFunction gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
+cgNodeToMuseFunction gr children labeledNode@(n,label) =
+    case computationType label of
         -- FIXME
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
         Conditional cond trueBranch falseBranch ->
@@ -22,13 +22,13 @@ cgNodeToMuseFunction gr children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
         otherwise -> cgNodeToClojureFunction gr children labeledNode
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
-    timeout' = fromMaybe n t
+    timeout' = fromMaybe n (timeout label)
     timeoutStr = show timeout'
 
 
 cgNodeToMuseAppFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToMuseAppFunction graph children labeledNode@(n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
+cgNodeToMuseAppFunction graph children labeledNode@(n,label) =
+    case computationType label of
         OtherComputation -> "(<$> compute " ++ wrappedArgumentStr ++ ")"
         -- FIXME
         Map -> "(traverse ifn" ++ nodeToUniqueName n ++ " " ++ childrenStr ++ ")"
@@ -37,7 +37,7 @@ cgNodeToMuseAppFunction graph children labeledNode@(n,CodeGraphNodeLabel _ ctype
         Rename name -> "(return " ++ name ++ ")"
         otherwise -> cgNodeToClojureAppFunction graph children labeledNode
   where
-    timeout' = fromMaybe n t
+    timeout' = fromMaybe n (timeout label)
     timeoutStr = show timeout'
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
     wrappedArgumentStr = "(return " ++ List.intercalate ") (return " (map nodeToUniqueName children ++ [timeoutStr]) ++ ")"
