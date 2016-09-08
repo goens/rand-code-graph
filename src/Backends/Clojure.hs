@@ -18,7 +18,7 @@ import           Text.Printf
 cgNodeToClojureFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToClojureFunction _ children (n,label) =
     case computationType label of
-        DataSource -> printf "(get-data %s \"service-name\" %s)" childrenStr timeout'
+        DataSource -> printf "(get-data %s \"service-name\" %d)" childrenStr timeout'
         SlowDataSource -> printf "(slow-get-data %s \"service-name\" %d)" childrenStr (10000 + timeout')
         OtherComputation -> printf "(compute %s %d)" childrenStr timeout'
         SideEffect -> printf "(write-data %s \"service-name\" %d)" childrenStr timeout'
@@ -29,7 +29,7 @@ cgNodeToClojureFunction _ children (n,label) =
             if shouldInlineIfBranches undefined
                 then printf "(if %s %s %s)" condBr callThen callElse
                 else printf
-                      "(let [%s %s\n%s %S] (if %s %s %s))"
+                      "(let [%s %s\n%s %s] (if %s %s %s))"
                       thenTemp callThen
                       elseTemp callElse
                       condBr

@@ -32,15 +32,19 @@ cgNodeToHaskellFunction children (n,label) =
             (fromMaybe "[]" $ mapIndex label)
             (List.intercalate ", " $ map nodeToUniqueName children)
         OtherComputation -> "compute " ++ timeoutChildrenList
-        NamedFunction name ->  name ++ " " ++ paramList
-        Function -> "ifn" ++ nodeToUniqueName n ++ " "  ++ paramList
+        -- HACK (temporary)
+        -- NamedFunction name ->  name ++ " " ++ paramList
+        NamedFunction name -> printf "%s (length [%s])" name (List.intercalate ", " (map nodeToUniqueName children))
+        -- HACK (temporary)
+        -- Function -> "ifn" ++ nodeToUniqueName n ++ " "  ++ paramList
+        Function -> printf "ifn%s (length [%s])" (nodeToUniqueName n) (List.intercalate ", " (map nodeToUniqueName children))
         Map ->
           printf
             "fmap length (mapM (uncurry ifn%s) [%s])"
             (nodeToUniqueName n)
             (List.intercalate ", " l)
           where l = [ "(" ++ maybe "" (++ " ++ ") (mapIndex label) ++ "[" ++ show index ++ "]" ++ ", " ++ val ++ ")"
-                    | (index, val) <- zip [0..] (timeoutStr : map nodeToUniqueName children)
+                    | (index, val) <- zip [0..] (map nodeToUniqueName children)
                     ]
         SideEffect -> "writeData \"service-name\" " ++ timeoutChildrenList
         Conditional cond _ _ ->

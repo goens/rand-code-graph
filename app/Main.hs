@@ -73,11 +73,17 @@ import           LevelGraphs                (Arity, CodeGraph,
 import           System.Console.CmdArgs
 import qualified System.Random              (StdGen, getStdGen, mkStdGen,
                                              random)
+import Data.IORef
+import System.IO.Unsafe (unsafePerformIO)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
 
 --
+
+maxLevelWidth :: IORef Int
+maxLevelWidth = unsafePerformIO $ newIORef 6
+
 relabelNodes :: MonadState Int m => [CodeGraph] -> m [CodeGraph]
 relabelNodes subgraphs = mapM f subgraphs
     where
@@ -157,6 +163,7 @@ isMapOp = go . computationType
 
 
 calculateArity :: CodeGraph -> LNode CodeGraphNodeLabel -> Arity
+-- calculateArity _ _ = 1 -- HACK (temporary)
 calculateArity _ (_, CodeGraphNodeLabel _ Map _ _) = 1
 calculateArity graph (a, _) = length $ suc graph a
 
@@ -171,6 +178,12 @@ gufoldM f u g
 
 ggmapM :: (DynGraph gr, Monad m) => (Context a b -> m (Context c d)) -> gr a b -> m (gr c d)
 ggmapM f = gufoldM (\c gr -> (Graph.& gr) <$> f c) empty
+
+
+levelWidthPercentages :: [(Int, Rational)]
+levelWidthPercentages = take newBase $ map (second (fac *)) [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]
+    where newBase = unsafePerformIO $ readIORef maxLevelWidth
+          fac = realToFrac newBase / 6
 
 
 randomExampleBenchmark :: MonadRandom m => Bool -> Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
@@ -194,7 +207,7 @@ randomExampleBenchmark withBigDS weightMap typeWeights ifPercentage len = do
 
     return (gr, subgr)
   where
-    lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
+    lvllist = (sequence $ replicate len (Control.Monad.Random.fromList levelWidthPercentages))
     --lvllist' = liftM2 trace ((\x -> do thelist <- lvllist; return ("list: " ++ (show thelist) ++ "\n")) mylist) mylist
 
     -- This type signature is necessary to make the return independant of the
@@ -219,17 +232,25 @@ removeEmptyMaps graph = ggmapM (\(a, nodeId, label, b) -> (a,nodeId,,b) <$> f no
   where
     f nodeId label =
       case computationType label of
-        Map | length (suc graph nodeId) < 2 -> do
-          num <- getRandom
-          return $ label { computationType = [OtherComputation, DataSource] !! (num `mod` 2 :: Int) }
-        _ -> return label
+          Map | length (suc graph nodeId) < 2 -> do
+              num <- getRandom
+              return $ label { computationType = [OtherComputation, DataSource] !! (num `mod` 2 :: Int) }
+          -- HACK (temporary)
+          Function | length (suc graph nodeId) < 2 -> do
+              num <- getRandom
+              return $ label { computationType = [OtherComputation, DataSource] !! (num `mod` 2 :: Int) }
+          -- HACK (temporary)
+          NamedFunction _ | length (suc graph nodeId) < 2 -> do
+              num <- getRandom
+              return $ label { computationType = [OtherComputation, DataSource] !! (num `mod` 2 :: Int) }
+          _ -> return label
 
 
 randomExampleBenchmarkBDS :: forall m . MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> Double -> Int -> m NestedCodeGraph
 randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len =
     let
         lvllist :: m [Int]
-        lvllist = (sequence $ replicate len (Control.Monad.Random.fromList [(1,0.1), (2,0.3), (3,0.4), (4,0.1), (5,0.07), (6,0.03) ]))
+        lvllist = (sequence $ replicate len (Control.Monad.Random.fromList levelWidthPercentages))
         mainGraph = lvllist >>= genRandomCodeGraphBigDS weightMap typeWeights >>= makeCondCGWithProb ifPercentage
         subGraphs = return [] :: m CodeSubGraphs -- TODO: generate subgraphs (recursively!)
     in sequenceT (mainGraph, subGraphs)
@@ -245,6 +266,7 @@ genExampleBenchmark
         , percentageFuns = funPercentage
         , percentageMaps = mapPercentage
         , percentageIfs = ifPercentage
+        , percentageSlow = slowPercentage
         , slowdatasource = slowDS
         , cachenum = cache
         })
@@ -256,7 +278,7 @@ genExampleBenchmark
     -- Derivated data structures
     lvllist = take total $ cycle [lvls,(lvls-1)..0]
     weightMap = exampleMapUpTo lvls
-    typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
+    typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage, slowPercentage]
     concatenateFun = concatenateTests
     randomBenchmark' :: MonadRandom m => Int -> m NestedCodeGraph
     randomBenchmark' lvl = randomExampleBenchmark slowDS weightMap typeWeights ifPercentage lvl
@@ -291,6 +313,8 @@ data LGCmdArgs = LGCmdArgs {output            :: String,
                             percentageFuns    :: Double,
                             percentageMaps    :: Double,
                             percentageIfs     :: Double,
+                            percentageSlow    :: Double,
+                            levelWidth        :: Int,
                             slowdatasource    :: Bool,
                             cachenum          :: Maybe Int,
                             preamble          :: Maybe FilePath,
@@ -310,6 +334,8 @@ lgCmdArgs = LGCmdArgs
     , percentageFuns = 0 &= help "Percentage of nodes that shall be functions (with their own code graph). It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0"
     , percentageMaps = 0 &= help "Percentage of nodes that shall be invocations of the higher-order function 'map' (or derivatives thereof). It must add up to 1 with the percentages for sources, and executes (implicit). Default is 0"
     , percentageIfs = 0 &= help "Percentage of nodes that shall be conditionals (ifs). Must be between 0 and 1. Independent of sources, sinks and executes (is applied *in the end*). Default is 0"
+    , percentageSlow = 0 &= help "Percentage of slow data sources to use. Default 0"
+    , levelWidth = 6 &= help "Maximum width of levels"
     , preamble = def &= name "p" &= help "Prepend some code to the generated code."
     , cachenum = Nothing &= name "c" &= help "Make a results that are cachable. Will generate from c possible requests. If flag is not present, caching is off. In this case all requests are different."
     , slowdatasource = False &= name "S" &= help "Include a slow data source at one side."
@@ -335,6 +361,7 @@ checkArgs (LGCmdArgs
   , percentageSinks = sinkPercentage
   , percentageFuns = funPercentage
   , percentageMaps = mapPercentage
+  , percentageSlow = slowPercentage
   })
   = catMaybes
       [ testThat (l <= 0) "Error: Non-positive level!"
@@ -350,7 +377,7 @@ checkArgs (LGCmdArgs
              (totalPrecentages > 1))
             "Error: Percentages for node types must be between 0 and 1. Percentages for source and sink must add to <= 1 (the rest is implicitly the percentage for compute nodes)"
       ]
-  where totalPrecentages = sinkPercentage + srcPercentage + funPercentage + mapPercentage
+  where totalPrecentages = sinkPercentage + srcPercentage + funPercentage + mapPercentage + slowPercentage
 -- --------------------
 --    output functions
 -- --------------------
@@ -395,6 +422,7 @@ main = do
         -- Main execution branch
 
         writeIORef inlineIfBranches (inlineIf lgArgs)
+        writeIORef maxLevelWidth (levelWidth lgArgs)
 
         randSeed <- if (seed lgArgs) == (-1)
                         then do

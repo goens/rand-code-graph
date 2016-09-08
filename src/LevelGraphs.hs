@@ -50,6 +50,7 @@ import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
 import qualified Data.Tuple           as Tuple
 import           Debug.Trace
+import Text.Printf (printf)
 --import           Data.Typeable()
 
 traceWith :: Show a => String -> a -> a
@@ -235,7 +236,7 @@ rconcat :: MonadRandom m => m [a] -> m [a] -> m [a]
 rconcat = liftM2 (++)
 
 rguard ::(MonadRandom m, MonadPlus n) => m Bool -> m (n ())
-rguard = (liftM guard)
+rguard = liftM guard
 
 
 --the following 4 functions adapted from http://www.rosettacode.org/wiki/Knuth_shuffle#Haskell
@@ -262,7 +263,7 @@ ctWithProb :: MonadRandom m => [Double] -> m ComputationType
 ctWithProb ps =
     let
         ps' = map toRational ps
-    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, Function, Map, OtherComputation] (ps' ++ [1 - (sum ps')])
+    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, Function, Map, SlowDataSource, OtherComputation] (ps' ++ [1 - (sum ps')])
 
 condWithProb :: MonadRandom m => Double -> Gr a () -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
 condWithProb p graph oldctx@(pre,node, oldLabel,children) =
@@ -452,22 +453,19 @@ joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes
 
 genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
 genRandomCodeGraph _ cTypeProb [] = makeRandomCodeGraph cTypeProb (nullLevelGraph 1 1)
-genRandomCodeGraph probMap cTypeProb edgesPerLevel =
-  let
-      levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
-      levelGraph' = Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
-      levelGraph = Control.Monad.liftM2 makeGraphRooted (liftM (pred . minLevel) levelGraph') levelGraph'
-  in
-    levelGraph >>= (makeRandomCodeGraph cTypeProb)
+genRandomCodeGraph probMap cTypeProb edgesPerLevel = do
+    let levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
+    levelGraph' <- foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
+    let levelGraph = makeGraphRooted (pred $ minLevel levelGraph') levelGraph'
+    makeRandomCodeGraph cTypeProb levelGraph
 
 genRandomCodeGraphBigDS :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
 genRandomCodeGraphBigDS _ cTypeProb [] = makeRandomCodeGraph cTypeProb (nullLevelGraph 1 1)
-genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel =
-  let
-      levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
-      levelGraph = Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
-      codeGraph' = levelGraph >>= (makeRandomCodeGraph cTypeProb)
-  in liftM makeGraphUnbalancedBigTree codeGraph'
+genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel = do
+    let levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
+    levelGraph <- foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
+    codeGraph' <- makeRandomCodeGraph cTypeProb levelGraph
+    return $ makeGraphUnbalancedBigTree codeGraph'
 
 -- makeCodeGraphRandomlyTimed :: MonadRandom m => Int -> CodeGraph  -> m CodeGraph
 -- makeCodeGraphRandomlyTimed n graph = liftM2 (flip Graph.nmap) (return graph) <=< makeTimed
@@ -518,9 +516,11 @@ listTests randomGraphsTup = singleString
       randomGraphs = map fst randomGraphsTup
       randomGraphsNumbered = zip [0..] randomGraphs
       totallevels = maximum $ map levelsCGraph randomGraphs
-      makeNameString (x,y) = "(run_test_level" ++ curLvlStr ++ "_" ++ curInstanceStr ++ ", " ++ curLvlStr ++ ", " ++ curInstanceStr ++ ")"
-          where curLvlStr = (show $ levelsCGraph y)
-                curInstanceStr =  show (x `quot` totallevels)
+      makeNameString (x,y) = printf "(run_test_level%d_%d, %d, %d)"
+                                (levelsCGraph y)
+                                (x `quot` totallevels)
+                                (levelsCGraph y)
+                                (x `quot` totallevels)
       strings = map makeNameString randomGraphsNumbered
       singleString = "[" ++ (List.intercalate ", " strings) ++ "]"
 

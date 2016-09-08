@@ -14,11 +14,17 @@ import qualified Data.Tuple                 as Tuple
 import           Debug.Trace
 
 import           Data.Maybe                 (fromMaybe)
+import Text.Printf
+
 
 cgNodeToOhua  :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
 cgNodeToOhua gr children labeledNode@(n,label) =
     case computationType label of
-        Map -> "(count (smap ifn" ++ nodeToUniqueName n ++ " (mvector " ++ childrenStr ++ ") " ++ "))"
+        Map -> printf "(count (smap ifn%s (mvector %s)))" (nodeToUniqueName n) childrenStr
+        -- HACK (temporary)
+        NamedFunction name -> printf "(let [v (count (mvector %s))] (seq v (%s v)))" childrenStr name
+        -- HACK (temporary)
+        Function -> printf "(let [v (count (mvector %s))] (seq v (ifn%s v)))" childrenStr (nodeToUniqueName n)
         otherwise -> cgNodeToClojureFunction gr children labeledNode
   where
     childrenStr = List.intercalate " " (map nodeToUniqueName children)
