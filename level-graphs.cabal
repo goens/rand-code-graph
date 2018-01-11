@@ -53,13 +53,15 @@ library
                  , Backends.Haxl
                  , Backends.Clojure
                  , Backends.Muse
+                 , Program
   build-depends:       base,
                        MonadRandom,
                        random,
                        fgl >= 5.5.2,
                        containers,
                        tuple,
-                       mtl
+                       mtl,
+                       prettyprinter
   hs-source-dirs:      src
   default-language:    Haskell98
 
