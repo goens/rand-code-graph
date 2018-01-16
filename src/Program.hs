@@ -1,123 +1,106 @@
+{-# LANGUAGE ExplicitForAll             #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE Rank2Types                 #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
 module Program where
 
+import           Data.Default.Class
+import           Data.Function
 import           Data.List                 (intersperse)
 import           Data.String
 import           Data.Text.Prettyprint.Doc
 
+type Serialized = Doc ()
+
 newtype Symbol = Symbol { symToStr :: String } deriving IsString
+
+type Type = ()
+
+data Typed a = Typed Type a
 
 instance Pretty Symbol where
   pretty = pretty . symToStr
 
-data Program = Program
-  { functions :: [(Symbol, Function)]
-  , main      :: Function
+data Program lang = Program
+  { functions :: [NamedFunction lang]
+  , main      :: Function lang
+  }
+
+data NamedFunction lang = NamedFunction
+  { functionName          :: Symbol
+  , namedFunctionFunction :: Function lang
   }
 
 data Function = Function
   { parameters   :: [Symbol]
-  , functionBody :: Expression
+  , functionBody :: lang
   }
 
-data Expression
+data HsDestr
+  = DestrVar Symbol
+  | DestrList [HsDestr]
+  | DestrCon Symbol [HsDestr]
+  | DestrTuple [HsDestr]
+
+data HsExpr
   = VarE Symbol
-  | ApplyE Expression [Expression]
-  | LambdaE Function
-  | BlockE Block
-  | LetE Symbol Expression Expression
-  | ConditionalE Expression Expression Expression
+  | ApplyE HsExpr [HsExpr]
+  | LambdaE (Function HsExpr)
+  | DoE HsStmt
+  | LetE HsDestr HsExpr HsExpr
+  | IfE HsExpr HsExpr HsExpr
+  | LitE (Lit HsExpr)
 
-data Block = Block
-  { statements       :: [Statement]
-  , returnExpression :: Expression
-  }
+data Lit lang
+  = LitInt Int
+  | LitStr String
+  | LitBool Bool
+  | LitList [lang]
 
-data Statement
-  = BindValue Symbol Block
+data HsStmt
+  = BindValue HsDestr HsExpr HsStmt
+  | LetAssign HsDestr HsExpr HsStmt
+  | Return HsExpr
 
-
-
-data Renderer a = Renderer
-  { renderProgram :: [Doc a] -> Doc a -> Doc a
-  , renderFunction :: Doc a -> [Doc a] -> Doc a -> Doc a
-  , renderLambda :: [Doc a] -> Doc a -> Doc a
-  , renderVar :: Doc a -> Doc a
-  , renderApply :: Doc a -> [Doc a] -> Doc a
-  , renderBlockExpression :: Doc a -> Doc a -- how to render a block when used in a bare expression
-  , renderBlock :: [Doc a] -> Doc a -> Doc a
-  , renderLet :: Doc a -> Doc a -> Doc a -> Doc a
-  , renderConditional :: Doc a -> Doc a -> Doc a -> Doc a
-  , renderSymbol :: Symbol -> Doc a
-  , renderBindValue :: Doc a -> Doc a -> Doc a
-  }
-
-haskell :: Renderer a
-haskell = Renderer
-  { renderProgram = \funs main -> vsep $ intersperse line $ funs ++ [main]
-  , renderFunction = \name params body ->
-      vsep
-        [ name <+> "::" <+> mkSig params
-        , name <+> hsep params <+> "=" <+> body
-        ]
-  , renderLambda = \params body -> "\\" <> hsep params <+> "->" <+> body
-  , renderVar = id
-  , renderSymbol = pretty
-  , renderBlockExpression = parens
-  , renderBlock = \stmts ret -> "do" <> line <> indent 2 (vsep $ stmts ++ ["pure" <+> ret])
-  , renderLet = \var e r -> "let" <+> var <+> "=" <+> e <+> "in" <+> r
-  , renderConditional = \b t e -> "if" <+> b <+> "then" <+> t <+> "else" <+> e
-  , renderBindValue = \var val -> var <+> "<-" <+> val
-  , renderApply = \fun args -> fun <+> hsep args
-  }
-  where
-    mkSig = hsep . intersperse "->" . map (const $ "Int")
+data CljExpr
+  = Form [CljExpr]
+  | CljLit (Lit CljExpr)
+  | CljSym Symbol
+  | Keyword Symbol
 
 
-clojure :: Renderer a
-clojure = Renderer
-  { renderProgram = \funs main -> vsep $ intersperse line $ funs ++ [main]
-  , renderFunction = \name params body ->
-      parens $ "defn" <+> name <+> toArgList params <> line <> indent 2 body
-  , renderLambda = \params body -> parens $ "fn" <+> toArgList params <+> body
-  , renderVar = id
-  , renderSymbol = pretty
-  , renderBlockExpression = id
-  , renderBlock = \stmts ret -> parens $ "let" <+> brackets (align (vsep stmts)) <> line <> indent 2 ret
-  , renderLet = \var e r -> parens $ "let" <+> brackets (var <+> align e) <> line <> indent 2 r
-  , renderConditional = \b t e -> parens $ "if" <+> b <+> t <+> e
-  , renderBindValue = \var val -> var <+> align val
-  , renderApply = \fun args -> parens $ hsep (fun:args)
-  }
-  where
-    toArgList = brackets . hsep
+instance Renderable (Program CljExpr) where
+  render Program{..} = vsep $ intersperse line $ map r functions ++ [r main]
+instance Renderable (NamedFunction CljExpr) where
+  render NamedFunction{functionName = name, namedFunctionFunction = Function{..}} =
+    parens $ "defn" <+> render name <+> brackets (hsep (map render parameters)) <> line <> indent 2 (render functionBody)
+instance Renderable (Function CljExpr) where
+  render Function{..} =
+    align $ parens $ "fn" <+> brackets (hsep (map render parameters)) <> softline <> indent 2 (render functionBody)
+instance Renderable CljExpr where
+  render (Form stuff) = parens $ hsep (map render stuff)
+  render (CljLit l) = render l
+  render (CljSym s) = render s
+  render (Keyword k) = pretty ':' <> render k
+instance Renderable HsDestr where
+  render 
 
-
-render :: Renderer a -> Program -> Doc a
-render Renderer{..} Program{..} = renderProgram (map (uncurry renderFun) functions) $ renderFun mainFunName main
-  where
-    mainFunName = Symbol "main"
-    renderFun name Function{..} = renderFunction (renderSymbol name) (map renderSymbol parameters) (renderExpression functionBody)
-    renderExpression (VarE e) = renderVar $ renderSymbol e
-    renderExpression (ApplyE fun params) = renderApply (renderExpression fun) (map renderExpression params)
-    renderExpression (LambdaE Function{..}) = renderLambda (map renderSymbol parameters) (renderExpression functionBody)
-    renderExpression (BlockE b) = renderBlockExpression $ renderBlockV b
-    renderExpression (LetE sym val body) = renderLet (renderSymbol sym) (renderExpression val) (renderExpression body)
-    renderExpression (ConditionalE i t e) = renderConditional (renderExpression i) (renderExpression t) (renderExpression e)
-
-    renderBlockV Block{..} = renderBlock (map renderStatement statements) $ renderExpression returnExpression
-
-    renderStatement (BindValue sym b) = renderBindValue (renderSymbol sym) (renderBlockV b)
-
+instance Renderable (Lit CljExpr) where
+  render (LitInt i) = pretty $ show i
+  render (LitStr str) = pretty $ show str
+  render (LitBool True) = "true"
+  render (LitBool False) = "false"
+  render (LitList l) = brackets $ hsep $ map r l
 
 -- If you want to test it try running `render haskell testprog` and `render clojure testprog` in ghci
 testprog =
   Program
-    [ ("f", Function ["a", "b"] (ApplyE (VarE "plus") [VarE "a", VarE "b"])) 
+    [ NamedFunction "f" (Function ["a", "b"] (ApplyE (VarE "plus") [VarE "a", VarE "b"]))
     ]
-    (Function [] (BlockE (Block [BindValue a (Block [] $ ApplyE (VarE getSomething) [VarE aHandle])] (VarE a))))
+    (Function ["a"] (BlockE (Block (BindValue a (ApplyE (VarE getSomething) [VarE aHandle]) (Return (VarE a))))))
   where
     a = "a"
     getSomething = "getSomething"

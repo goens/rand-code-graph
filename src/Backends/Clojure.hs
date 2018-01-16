@@ -1,63 +1,44 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Backends.Clojure where
 
-import LevelGraphs
+import           LevelGraphs as G
+import           Data.Maybe              (fromMaybe)
+import Data.Graph.Inductive    as Graph
+import           Backend.Language.Clojure as L
+import           Backend.Language.Common as L
+import Data.Default.Class
 
-import           Data.Maybe           (fromMaybe)
 
-import qualified Data.Graph.Inductive as Graph
+toClojureCode :: String -> NestedCodeGraph -> Serialized
+toClojureCode _ = renderProgram def . toProgram convertLevels
 
-import qualified Data.List            as List
-import qualified Data.Map.Strict      as Map
-import qualified Data.Tuple           as Tuple
-
-cgNodeToClojureFunction  :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToClojureFunction _ children (n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
-        DataSource -> "(get-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr  ++ ")"
-        SlowDataSource -> "(slow-get-data " ++ childrenStr ++ " \"service-name\" " ++ (show $ 10000 + timeout')  ++ ")"
-        OtherComputation -> "(compute " ++ childrenStr ++ " " ++ timeoutStr ++ ")"
-        SideEffect -> "(write-data " ++ childrenStr ++ " \"service-name\" " ++ timeoutStr ++ ")"
-        NamedFunction name -> "(" ++ name ++ (if null children then [] else " ") ++ childrenStr ++ ")"
-        Function -> "(ifn" ++ nodeToUniqueName n ++ (if null children then [] else " ") ++ childrenStr ++ ")"
-        Map -> "(count (map ifn" ++ nodeToUniqueName n ++ " (vector " ++ childrenStr ++ ") " ++ "))"
-        Conditional cond trueBranch falseBranch ->
-          "(if " ++ List.intercalate " " (map (maybe "nil" nodeToUniqueName) [cond, trueBranch,falseBranch] ) ++ ")"
-        Rename name -> name
+convertLevels :: (Node -> [Node]) -> [[Graph.LNode CodeGraphNodeLabel]] -> Expr
+convertLevels getSuc lvls = mkLet assigns [finalExpr]
   where
-    childrenStr = List.intercalate " " (map nodeToUniqueName children)
-    timeout' = fromMaybe n t
-    timeoutStr = show timeout'
+    toFun n = toFunClj n (map (Sym . varName) $ getSuc (fst n))
+    (assigns, finalExpr) = toAssign [] lvls
+    toAssign _ [] = error "empty"
+    toAssign l [x] =
+      case x of
+        [x] -> (l, toFun x)
+        _   -> error "last level must have exactly one node"
+    toAssign l (x:xs) = toAssign (e ++ l) xs
+      where
+        e = case x of
+              [] -> error "empty assignment"
+              [n@(id, _)] -> [(Sym $ varName id, toFun n)]
+              fs ->  map (\n@(id, _) -> (Sym $ varName id, toFun n)) fs
 
-
-cgNodeToClojureAppFunction :: CodeGraph -> [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToClojureAppFunction = cgNodeToClojureFunction
-
-
-cgNodeToClojureLetDef :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToClojureLetDef toCode graph x@(x1,_) = nodeToUniqueName x1 ++ " " ++ cgNodeToClojureFunction graph (Graph.suc graph x1) x
-
-toClojureFunctions :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
-toClojureFunctions toCode subGraphs = toClojureSubFunctions toCode subGraphs (toClojureSubFunctionHead "defn")
-
-toClojureSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> HeadFunction -> String
-toClojureSubFunctions _ [] _ = ""
-toClojureSubFunctions toCode subgraphs hdFun = List.intercalate "\n" $ map (toClojureSubFunction toCode hdFun) $ reverse subgraphs
-
-toClojureSubFunction :: (CodeGraph -> String) -> HeadFunction -> (CodeGraph, FnName, Arity) -> String
-toClojureSubFunction toCode hdFun namedgr =
-    let
-        (head, transformedGraph) = hdFun namedgr
-    in "(" ++ head ++ toCode transformedGraph ++ ")"
-
-type HeadFunction =  (CodeGraph, String, Arity) -> (String, CodeGraph)
-toClojureSubFunctionHead :: String -> HeadFunction
-toClojureSubFunctionHead defName (graph, name, arity) =
-    let
-        parameterNamesList =  map (\x -> "parameter-" ++ show x) [1..arity]
-        parameterNames = List.intercalate " " parameterNamesList
-        transformedGraph = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
-        head = defName ++ " " ++ name ++ " [" ++ parameterNames ++ "]\n"
-    in ( head, transformedGraph)
-
---cgNodeToClojureApplicative :: (CodeGraph -> String) -> CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
---cgNodeToClojureApplicative toCode graph = (\x -> (nodeToUniqueName $ fst x) ++ " " ++ ((cgNodeToClojureFunction toCode) graph (Graph.suc graph $ fst x) x))
+toFunClj :: Graph.LNode CodeGraphNodeLabel -> [Expr] -> Expr
+toFunClj node@(n, CodeGraphNodeLabel _ lab _) children =
+  case lab of
+    DataSource -> Form $ Sym "get-data" : children
+    SlowDataSource -> Form $ Sym "slow-get-data" : children
+    OtherComputation -> Form $ Sym "compute" : children
+    SideEffect -> Form $ Sym "write-data" : children
+    G.NamedFunction name -> Form $ Sym (Symbol name) : children
+    G.Function -> Form $ Sym (fnName n) : children
+    Map -> Form [Sym "count", Form [Sym "map", Sym (fnName n), Form $ Sym "vector" : children]]
+    Conditional cond true false -> mkIf (maybe (Bool True) mkRef cond) (maybe Nil mkRef true) (fmap mkRef false)
+      where mkRef = Sym . varName
+    Rename name -> Sym $ Symbol name

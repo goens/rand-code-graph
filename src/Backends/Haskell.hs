@@ -1,67 +1,62 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Backends.Haskell where
 
-import LevelGraphs
 import           Data.Maybe           (fromMaybe)
-
+import           LevelGraphs as G
 import qualified Data.Graph.Inductive as Graph
+import Backend.Language.Common as L
+import Backend.Language.Haskell as L
+import Control.Arrow
 
-import qualified Data.List            as List
-import qualified Data.Map.Strict      as Map
-import qualified Data.Tuple           as Tuple
 
-helperNodeToHaskellFunction :: [Graph.Node] -> String
-helperNodeToHaskellFunction children = listStart ++ List.intercalate ", " (map nodeToUniqueName children)
-    where listStart = if null children then "" else ", "
+applyMany :: Expr -> [Expr] -> Expr
+applyMany = foldl ApplyE
 
-cgNodeToHaskellFunction :: [Graph.Node] -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToHaskellFunction children (n,CodeGraphNodeLabel _ ctype t) =
-    case ctype of
-        DataSource -> "getData \"service-name\" " ++ timeoutChildrenList
-        SlowDataSource -> "slowGetData \"service-name\" " ++ listWTimeout (show $ 10000 + timeout')
-        OtherComputation -> "compute " ++ timeoutChildrenList
-        NamedFunction name ->  name ++ " " ++ paramList
-        Function -> "ifn" ++ nodeToUniqueName n ++ " "  ++ paramList
-        Map -> "fmap length (mapM ifn" ++ nodeToUniqueName n ++ " " ++ timeoutChildrenList ++ ")"
-        SideEffect -> "writeData \"service-name\" " ++ timeoutChildrenList
-        Conditional cond trueBranch falseBranch ->
-            "return (if " ++ maybe "True" ( (++ " == 0") . nodeToUniqueName) cond ++ " then " ++ f trueBranch ++ " else " ++ f falseBranch ++ ")"
-          where f = maybe "0" nodeToUniqueName
-        Rename name -> "return " ++ name
+parBndApp :: [Symbol] -> [Expr] -> Stmt -> Stmt
+parBndApp vars exprs cont =
+  RetS $ applyMany (VarE $ Symbol $ "liftA" ++ show (length vars)) (LambdaE (L.Function vars (DoE cont )) : exprs)
+
+
+parBndDo :: [Symbol] -> [Expr] -> Stmt -> Stmt
+parBndDo vars exprs cont =
+  foldr
+    (\(var, expr) -> VarD var `BindS` expr)
+    cont
+    (zip vars exprs)
+
+convertLevelsHs :: ([Symbol] -> [Expr] -> Stmt -> Stmt)
+                -> (Int -> [Int])
+                -> [[(Int, CodeGraphNodeLabel)]]
+                -> Expr
+convertLevelsHs parBnd getSuc l
+  | [x] <- l = lastLevel x
+  | otherwise = DoE $ toStmt l
   where
-    timeout' = fromMaybe n t
-    timeoutStr = show timeout'
-    listWTimeout t = "[" ++ List.intercalate ", " (t: map nodeToUniqueName children) ++ "]"
-    paramList = List.intercalate " " (map nodeToUniqueName children)
-    timeoutChildrenList = listWTimeout timeoutStr
-
-cgNodeToHaskellDoBind:: CodeGraph -> Graph.LNode CodeGraphNodeLabel -> String
-cgNodeToHaskellDoBind graph x@(x1,_) = nodeToUniqueName x1 ++ " <- " ++ cgNodeToHaskellFunction (Graph.suc graph x1) x
-
-toHaskellDoCode :: CodeGraph -> String
-toHaskellDoCode graph = helperToHaskellDoCode nodes ++ "\n"
-    where
-      nodes = reverse $ cGraphTopSort graph --bottom up
-      trSpace = "  "
-      helperToHaskellDoCode ns = (concatMap (\x -> trSpace ++ cgNodeToHaskellDoBind graph x ++ "\n") ns) ++ trSpace ++ "return " ++ nodeToUniqueName (fst $ last ns) ++ "\n"
+    toStmt [] = error "empty graph"
+    toStmt [lvl] = RetS $ lastLevel lvl
+    toStmt (x:xs) =
+      case x of
+        []  -> error "empty level"
+        [f] -> BindS (VarD $ varName $ fst f) (toExpr f) (toStmt xs)
+        fs  -> parBnd vars exprs $ toStmt xs
+          where
+            (vars, exprs) = unzip (map (varName . fst &&& toExpr) fs)
+    lastLevel [x] = toExpr x
+    lastLevel _ = error "last level must have exactly one node"
+    toExpr nlab@(n, lab) = toFunHs nlab (map (VarE . varName) (getSuc n))
 
 
-toHaskellSubFunctions :: (CodeGraph -> String) -> [(CodeGraph, FnName, Arity)] -> String
-toHaskellSubFunctions _ [] = ""
-toHaskellSubFunctions toCode subgraphs = List.intercalate "\n" $ map (toHaskellSubFunction toCode) $ reverse subgraphs
-
-toHaskellSubFunction :: (CodeGraph -> String) -> (CodeGraph, FnName, Arity) -> String
-toHaskellSubFunction toCode namedgr =
-    let
-        (head, transformedGraph) = toHaskellSubFunctionHead namedgr
-    in head ++ toCode transformedGraph
-
-toHaskellSubFunctionHead :: (CodeGraph, String, Arity) -> (String, CodeGraph)
-toHaskellSubFunctionHead (graph, name, arity) =
-    let
-        parameterNamesList =  map (\x -> "parameter_" ++ show x) [1..arity]
-        paramTypes = List.replicate arity "Int"
-        typeSignature = name ++ "::" ++ List.intercalate " -> " (paramTypes ++ ["GenHaxl u Int"])
-        parameterNames = List.intercalate " " parameterNamesList
-        transformedGraph = cgMakeLvlNamed (maxLevelCG graph) parameterNamesList graph
-        head = typeSignature ++ "\n" ++ name ++ " " ++ parameterNames ++ " = do\n"
-    in (head, transformedGraph)
+toFunHs :: Graph.LNode CodeGraphNodeLabel -> [Expr] -> Expr
+toFunHs (n, CodeGraphNodeLabel _ lab _) = case lab of
+  DataSource -> stdApply (VarE "getData")
+  SideEffect -> stdApply (VarE "writeData")
+  OtherComputation -> stdApply (VarE "compute")
+  G.NamedFunction f -> applyMany (VarE (Symbol f))
+  G.Function -> applyMany (VarE (Symbol $ "fn" ++ show n))
+  Map -> ApplyE (VarE "mapM" `ApplyE` VarE (Symbol $ "fn" ++ show n)) . LitE . LitList
+  Rename name -> applyMany (VarE "pure")
+  Conditional b t e -> applyMany $ IfE (maybe (LitE (LitBool True)) (ApplyE (VarE "(==)") . VarE . varName) b) (f t) (f e)
+    where f = maybe (LitE (LitInt 0)) (VarE . varName)
+  where
+    getLen = pure . ApplyE (VarE "sum") . LitE . LitList
+    stdApply v = applyMany v . getLen

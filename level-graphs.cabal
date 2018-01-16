@@ -48,12 +48,14 @@ cabal-version:       >=1.10
 library
   exposed-modules: LevelGraphs
                  , Backend
+                 , Backend.Language.Haskell
+                 , Backend.Language.Clojure
+                 , Backend.Language.Common
   other-modules:   Backends.Ohua
                  , Backends.Haskell
                  , Backends.Haxl
                  , Backends.Clojure
                  , Backends.Muse
-                 , Program
   build-depends:       base,
                        MonadRandom,
                        random,
@@ -61,7 +63,8 @@ library
                        containers,
                        tuple,
                        mtl,
-                       prettyprinter
+                       prettyprinter,
+                       data-default-class
   hs-source-dirs:      src
   default-language:    Haskell98
 

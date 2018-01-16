@@ -479,7 +479,7 @@ nodeToUniqueName  =  (++) "local" . show
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
-concatenateTests ::  (String -> NestedCodeGraph -> String) -> [ NestedCodeGraph ] -> [(String,String)]
+concatenateTests ::  (String -> NestedCodeGraph -> a) -> [ NestedCodeGraph ] -> [(String,a)]
 concatenateTests toCodeWrapped randomGraphs = resultStrings
     where
       randomGraphsNumbered = zip [0..] randomGraphs

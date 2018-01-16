@@ -69,6 +69,7 @@ import           LevelGraphs                (Arity, CodeGraph,
 import           System.Console.CmdArgs
 import qualified System.Random              (StdGen, getStdGen, mkStdGen,
                                              random)
+import Backend.Language.Common (Serialized)
 ------------------------------------------------------------
 -- Benchmark Code
 ------------------------------------------------------------
@@ -212,7 +213,7 @@ randomExampleBenchmarkBDS weightMap typeWeights ifPercentage len =
     in sequenceT (mainGraph, subGraphs)
 
 
-genExampleBenchmark :: LGCmdArgs -> [(String, String)] -- Name, Code
+genExampleBenchmark :: LGCmdArgs -> [(String, Serialized)] -- Name, Code
 genExampleBenchmark
     lgArgs@(LGCmdArgs
         { totalGraphs = total
@@ -225,7 +226,7 @@ genExampleBenchmark
         , slowdatasource = slowDS
         , cachenum = cache
         })
-    = concatenateFun (toCodeWrapped lang) $ snd $ mapAccumL (\x y -> swap $ randomBenchmark x y) stdGen lvllist
+    = concatenateTests (toCodeWrapped lang) $ snd $ mapAccumL (\x y -> swap $ randomBenchmark x y) stdGen lvllist
   where
     lvls = levels lgArgs - 1
     stdGen = System.Random.mkStdGen $ seed lgArgs
@@ -234,7 +235,6 @@ genExampleBenchmark
     lvllist = take total $ cycle [lvls,(lvls-1)..0]
     weightMap = exampleMapUpTo lvls
     typeWeights = [srcPercentage,sinkPercentage, funPercentage, mapPercentage]
-    concatenateFun = concatenateTests
     randomBenchmark' :: MonadRandom m => Int -> m NestedCodeGraph
     randomBenchmark' lvl
         | slowDS = randomExampleBenchmarkBDS weightMap typeWeights ifPercentage lvl
@@ -242,8 +242,7 @@ genExampleBenchmark
 
     randomBenchmark :: System.Random.StdGen -> Int -> (NestedCodeGraph, System.Random.StdGen)
     randomBenchmark gen lvl
-        | isJust cache = flip runRand gen $ do
-            randomBenchmark' lvl >>= makeNestedCodeGraphRandomlyTimed (fromJust cache)
+        | Just c <- cache = flip runRand gen $ randomBenchmark' lvl >>= makeNestedCodeGraphRandomlyTimed c
         | otherwise = runRand (evalStateT (randomBenchmark' lvl) 0) gen
         -- case lang of
         --                "HaskellDo" -> (\x y -> concatenateTests x y ++ "\nallTests :: [((Env u -> IO Int),Int,Int)]\nallTests = " ++ listTests y)
@@ -385,11 +384,11 @@ main = do
         let outputStrings = genExampleBenchmark lgArgs { seed = randSeed }
 
         -- Print it accordingly
-        outputStrings <- case preamble lgArgs of
-                            Nothing -> return outputStrings
-                            Just file -> prepareOutputStrings file outputStrings
+        -- outputStrings <- case preamble lgArgs of
+        --                    Nothing -> return outputStrings
+        --                    Just file -> prepareOutputStrings file outputStrings
 
-        if outputFile == "" then
-            printSerialized outputStrings
-        else
-            writeToFiles outputFile (fst $ fromJust $ Map.lookup (language lgArgs) acceptedLanguages) outputStrings
+        -- if outputFile == "" then
+        mapM_ print outputStrings
+        -- else
+        --    writeToFiles outputFile (fst $ fromJust $ Map.lookup (language lgArgs) acceptedLanguages) outputStrings
