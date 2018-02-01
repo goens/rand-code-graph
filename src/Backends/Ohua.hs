@@ -1,14 +1,15 @@
-{-# LANGUAGE TupleSections, OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections     #-}
 module Backends.Ohua (toOhuaAppCodeWrapped, toOhuaCodeWrapped) where
 
-import           Backends.Clojure (toFunClj)
+import           Backends.Clojure           (toFunClj)
 import           LevelGraphs
 
+import           Backend.Language.Clojure
+import           Backend.Language.Common
 import           Data.Graph.Inductive       (Gr)
 import qualified Data.Graph.Inductive       as Graph
 import           Data.Graph.Inductive.Graph as G
-import           Backend.Language.Clojure
-import           Backend.Language.Common
 import           Data.Maybe                 (fromMaybe)
 
 
@@ -38,7 +39,7 @@ convertLevelsWith parBind getSuc lvls = mkLet assigns [finalExpr]
       case x of
         [x] -> (l, toFun x)
         _   -> error "last level must have exactly one node"
-    toAssign l (x:xs) = toAssign (e ++ l) xs
+    toAssign l (x:xs) = toAssign (l ++ e) xs
       where
         e = case x of
               []          -> error "empty assignment"
@@ -55,11 +56,13 @@ convertLevelsApp = convertLevelsWith $ \toFun fs -> [(Vect (map (Sym . varName .
 toFunOhua :: LNode CodeGraphNodeLabel -> [Expr] -> Expr
 toFunOhua node@(n, CodeGraphNodeLabel _ lab _) children =
   case lab of
-    Map -> Form [ Sym "count"
-                , Form [ Sym "smap"
-                       , Sym $ fnName n
-                       , Form $ Sym "mvector" : children
-                       ]
-                ]
+    Custom "map"
+      | null children -> Nil -- removes empty maps
+      | otherwise -> Form [ Sym "count"
+                          , Form [ Sym "smap"
+                                 , Sym $ fnName n
+                                 , Form $ Sym "mvector" : children
+                                 ]
+                          ]
     _ -> toFunClj node children
 

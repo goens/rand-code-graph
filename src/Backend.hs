@@ -1,19 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Backend where
 
-import           LevelGraphs             (NestedCodeGraph)
+import           LevelGraphs               (NestedCodeGraph)
 
-import qualified Data.Graph.Inductive    as Graph
+import qualified Data.Graph.Inductive      as Graph
 
 -- TODO: a more general mechanism is needed here that should take this configuration from the command line. -> API-design.
 import           Backend.Language.Common
-import           Backends.Haxl           (toHaxlCode,
-                                          toHaxlAppCode)
-import           Backends.Muse           (toMuseAppCode,
-                                          toMuseCode)
-import           Backends.Ohua           (toOhuaAppCodeWrapped,
-                                          toOhuaCodeWrapped)
-import qualified Data.Map                as Map
+import           Backends.Haxl             (toHaxlAppCode, toHaxlCode)
+import           Backends.Muse             (toMuseAppCode, toMuseCode)
+import           Backends.Ohua             (toOhuaAppCodeWrapped,
+                                            toOhuaCodeWrapped)
+import qualified Data.Map                  as Map
 import           Data.Text.Prettyprint.Doc
 
 ------------------------------------------------------------

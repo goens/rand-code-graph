@@ -64,7 +64,9 @@ library
                        tuple,
                        mtl,
                        prettyprinter,
-                       data-default-class
+                       data-default-class,
+                       split,
+                       recursion-schemes
   hs-source-dirs:      src
   default-language:    Haskell98
 
@@ -73,7 +75,7 @@ executable random-level-graphs
                        level-graphs,
                        random,
                        fgl >= 5.5.2,
-                       cmdargs,
+                       optparse-applicative,
                        MonadRandom,
                        containers,
                        tuple,

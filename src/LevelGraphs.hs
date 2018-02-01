@@ -1,6 +1,11 @@
-{-# LANGUAGE ViewPatterns  #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE ScopedTypeVariables, ExplicitForAll, TupleSections #-}
+{-# LANGUAGE ConstraintKinds            #-}
+{-# LANGUAGE ExplicitForAll             #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TupleSections              #-}
 -- | Code for generating random level-graphs, a sort of generalization of trees
 --   and generating lisp/haskell code following the structure of the graphs.
 --   This is part of a project for efficient IO batching using
@@ -33,21 +38,23 @@
 
 module LevelGraphs  where
 
-import           Control.Monad        (foldM,liftM,liftM2,mapM,guard,MonadPlus)
-import           Control.Monad.Random (MonadRandom,fromList, getRandomR)
-import           Data.Maybe           (fromMaybe)
-import           Data.Tuple.Sequence
-
-import qualified System.Random        (mkStdGen, setStdGen)
-
-import qualified Data.Graph.Inductive as Graph
+import           Control.Arrow
+import           Control.Monad        (MonadPlus, foldM, guard, liftM, liftM2,
+                                       mapM)
+import           Control.Monad.Random (MonadRandom, fromList, getRandomR)
+import           Control.Monad.Reader
+import           Data.Function        (on, (&))
 import           Data.Graph.Inductive (Gr)
+import qualified Data.Graph.Inductive as Graph
 import qualified Data.List            as List
 import qualified Data.Map.Strict      as Map
+import           Data.Maybe           (fromMaybe, isJust, mapMaybe)
+import           Data.Ratio
+import           Data.String
 import qualified Data.Tuple           as Tuple
-import Control.Arrow (second)
-import Data.Function (on)
-import Debug.Trace
+import           Data.Tuple.Sequence
+import           Debug.Trace
+import qualified System.Random        (mkStdGen, setStdGen)
 --import           Data.Typeable()
 
 traceWith :: Show a => String -> a -> a
@@ -59,34 +66,54 @@ type CondBranch = Maybe Graph.Node
 newtype Depth = Depth Int deriving (Show, Eq, Ord) -- depth remaning (0 means can't spawn a function there)
 
 data ComputationType
-    = DataSource
-    | SideEffect
-    | OtherComputation
-    | Function
-    | Map
-    | NamedFunction String
-    | Conditional CondBranch CondBranch CondBranch
-    | SlowDataSource
-    | Rename String -- TODO this is not good
-    deriving (Show, Eq) --conditional: condition true-branch false-branch
+  = Custom String
+  | Conditional (Maybe Graph.Node) (Maybe Graph.Node) (Maybe Graph.Node)
+ -- | Rename String
+  deriving (Show, Eq)
+
+ctIf :: ComputationType
+ctIf = Conditional Nothing Nothing Nothing
+
+instance IsString ComputationType where
+  fromString "if" = ctIf
+  fromString s    = Custom $ fromString s
 
 data Statistics = Statistics (Int, Double) deriving (Show, Eq) -- Mu, Sigma
 
 type Level = Int
 
+newtype FunctionName = FunctionName { functionNameToString :: String } deriving (Show, Eq, IsString)
+
+-- | Provides the specification for a subfunction.
+-- The first argument is the id of the node for which to generate the function
+-- (typically this number is incorporated somehow into the name itself).
+-- The second argumetn is the degree of the node (number of input arguments).
+type SubFunctionSpecProvider = Graph.Node -> Int -> [(FunctionName, Arity)]
+
+data GeneratorConfig = GeneratorConfig
+  { -- | Given a computation type this returns a provider for subfunction names
+    functionNodes        :: ComputationType -> Maybe SubFunctionSpecProvider
+  , percentages          :: [(ComputationType, Rational)]
+  -- | HACK and temporary. At some point this should be deined in some other way
+  , includeBigDataSource :: Bool
+  }
+
+
+type ReadConf m = MonadReader GeneratorConfig m
+
 data CodeGraphNodeLabel = CodeGraphNodeLabel
-    { level :: Level
+    { level           :: Level
     , computationType :: ComputationType
-    , timeout :: Maybe Int
+    , timeout         :: Maybe Int
     } deriving (Show,Eq)
 
 type LevelGraph = Data.Graph.Inductive.Gr Level () -- There can only be edges (a,b) if level a < level b
 type CodeGraph = Gr CodeGraphNodeLabel ()
 
 
-type Arity = Int
-type FnName = String
-type CodeSubGraphs = [(CodeGraph, FnName, Arity)]
+type Arity =  Int
+
+type CodeSubGraphs = [(CodeGraph, FunctionName, Arity)]
 type NestedCodeGraph = (CodeGraph, CodeSubGraphs)
 
 instance Ord CodeGraphNodeLabel where
@@ -133,19 +160,17 @@ lGraphLevelSort graph = [ lGraphGetLevel l graph | l <- levels ]
     levels = List.nub $ map snd topSort
 
 lGraphGetLevel :: Int -> LevelGraph -> [Graph.LNode Level]
-lGraphGetLevel lvl graph = subList lvl
-  where
-    topSort = lGraphTopSort graph
-    subList l = [ (node,l) | (node,l') <- topSort, l'==l]
+lGraphGetLevel lvl = filter ((== lvl) . snd) . lGraphTopSort
 
 cGraphTopSort :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
-cGraphTopSort = (map Tuple.swap) . List.sort . (map Tuple.swap) . Graph.labNodes
+cGraphTopSort = map Tuple.swap . List.sort . map Tuple.swap . Graph.labNodes
 
 cGraphLevelSort :: CodeGraph -> [[Graph.LNode CodeGraphNodeLabel]]
-cGraphLevelSort graph = [ cGraphGetLevel l graph | l <- levels ]
-  where
-    topSort = cGraphTopSort graph
-    levels = List.sort . List.nub $ map getLevelCGN topSort
+cGraphLevelSort graph
+  = cGraphTopSort graph
+  & map getLevelCGN
+  & List.sort . List.nub
+  & map (`cGraphGetLevel` graph)
 
 cGraphGetLevel :: Int -> CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
 cGraphGetLevel lvl graph = subList lvl
@@ -162,19 +187,16 @@ levelsCGraph  = length . List.nub . (map getLevelCGN) . Graph.labNodes
 
 subGraphFrom :: Gr a b -> Graph.Node -> Gr a b
 subGraphFrom graph start = Graph.subgraph sucnodes graph
-    where
-      sucfn = Graph.suc graph
-      getSucs [] = []
-      getSucs nodes =  nodes ++ getSucs (concatMap sucfn nodes)
-      sucnodes = getSucs [start]
+  where
+    sucfn = Graph.suc graph
+    getSucs []    = []
+    getSucs nodes =  nodes ++ getSucs (concatMap sucfn nodes)
+    sucnodes = getSucs [start]
 
-cgGetSubFunctions :: CodeGraph -> [Graph.LNode CodeGraphNodeLabel]
-cgGetSubFunctions graph = Graph.labNodes $ Graph.labnfilter isFunctionNode graph
-    where
-      isFunctionNode :: Graph.LNode CodeGraphNodeLabel -> Bool
-      isFunctionNode (_,CodeGraphNodeLabel _ Function _) = True
-      isFunctionNode (_,CodeGraphNodeLabel _ Map _) = True
-      isFunctionNode _ = False
+cgGetSubFunctions :: ReadConf m => CodeGraph -> m [(Graph.LNode CodeGraphNodeLabel, SubFunctionSpecProvider)]
+cgGetSubFunctions graph = do
+  isFunctionNode <- asks functionNodes
+  pure $ mapMaybe (\n -> (n,) <$> isFunctionNode (computationType (snd n))) $ Graph.labNodes graph
 
 graphGetLeaves ::  Gr a b -> [Graph.LNode a]
 graphGetLeaves gr = Graph.labNodes $ Graph.nfilter (null . Graph.suc gr) gr
@@ -187,23 +209,20 @@ cgSplitAtLvl lvl graph =
         restgraph = Graph.delNodes lastlvlnodes graph
     in (lastlvl, restgraph)
 
-cgMakeLvlNamed:: Int -> [String] -> CodeGraph -> CodeGraph
-cgMakeLvlNamed lvl names graph =
-    let
-        lvllist = List.sort . List.nub . (map getLevelCGN) . Graph.labNodes $ graph
-        lvllabelednodes = cGraphLevelSort graph !! fromMaybe (error "Nothing") (List.elemIndex lvl lvllist) -- should fail if Nothing
-        lvlnodes = map fst lvllabelednodes
-        convertFunction = (\(name, index) ->
-                           (\(p,v,l,s) ->
-                           if v == index
-                           then (p,v,l { computationType = Rename name },s)
-                           else (p,v,l,s)
-                           )
-                          )
-        convertFunction' graph toChange = Graph.gmap (convertFunction toChange) graph
-        replaceList = zip names lvlnodes
-    in foldl convertFunction' graph replaceList -- TODO: improve: this traveres graphs every time for each replace
-------------------------------------------------------------
+-- make sure this is not actually used anywhere but we might not need the `Rename` constructor after all
+-- cgMakeLvlNamed :: Int -> [String] -> CodeGraph -> CodeGraph
+-- cgMakeLvlNamed lvl names graph =
+--     let
+--         lvllist = List.sort . List.nub . (map getLevelCGN) . Graph.labNodes $ graph
+--         lvllabelednodes = cGraphLevelSort graph !! fromMaybe (error "Nothing") (List.elemIndex lvl lvllist) -- should fail if Nothing
+--         lvlnodes = map fst lvllabelednodes
+--         convertFunction (name, index) (p,v,l,s)
+--           | v == index = (p,v,l { computationType = Rename name },s)
+--           | otherwise = (p,v,l,s)
+--         convertFunction' graph toChange = Graph.gmap (convertFunction toChange) graph
+--         replaceList = zip names lvlnodes
+--     in foldl convertFunction' graph replaceList -- TODO: improve: this traveres graphs every time for each replace
+-- ------------------------------------------------------------
 -- Random-monad helper functions
 ------------------------------------------------------------
 
@@ -231,38 +250,34 @@ knuthShuffle :: MonadRandom m => [a] -> m [a]
 knuthShuffle xs =
   liftM (foldr transposition xs. zip [1..]) (mkRandListKnuth (length xs))
 
-trueWithProb :: MonadRandom m => Double -> m Bool
-trueWithProb p = let p' = toRational p in Control.Monad.Random.fromList [ (True, p'), (False, (1 - p')) ]
 
-dsWithProb :: MonadRandom m => Double -> m ComputationType
-dsWithProb p = let p' = toRational p in Control.Monad.Random.fromList [ (DataSource, p'), (OtherComputation, (1 - p')) ]
+-- dsWithProb :: MonadRandom m => Double -> m ComputationType
+-- dsWithProb p = let p' = toRational p in Control.Monad.Random.fromList [ (DataSource, p'), (OtherComputation, (1 - p')) ]
 
-ctWithProb :: MonadRandom m => [Double] -> m ComputationType
-ctWithProb ps =
-    let
-        ps' = map toRational ps
-    in Control.Monad.Random.fromList $ zip [DataSource, SideEffect, Function, Map, OtherComputation] (ps' ++ [1 - (sum ps')])
+ctWithProb :: (MonadRandom m, ReadConf m) => m ComputationType
+ctWithProb = Control.Monad.Random.fromList =<< asks percentages
 
-condWithProb :: MonadRandom m => Double -> Gr a () -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
-condWithProb p graph oldctx@(pre,node, oldLabel,children) =
-    if (length children > 3 || length children < 3 || (elem [] $ map (Graph.suc graph) (Graph.suc graph node) )) then return oldctx -- until we figure out a better way
-    else newctx >>= (\x -> return [(x,p'), (oldctx,1-p') ]) >>= Control.Monad.Random.fromList
-         where p' = toRational p
-               randomBranches :: MonadRandom m => m [Maybe Graph.Node]
-               randomBranches = knuthShuffle $ take 3 $ (map Just $ map snd children) ++ [Nothing,Nothing,Nothing]
-               randomConditional = liftM mkConditional $ randomBranches
-               newctx = liftM  (\x -> (pre,node, oldLabel { computationType = x, timeout = Nothing },children)) randomConditional
+condWithProb :: MonadRandom m => Rational -> Gr a () -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
+condWithProb p' graph oldctx@(pre,node, oldLabel,children) =
+  if (length children > 3 || length children < 3 || (elem [] $ map (Graph.suc graph) (Graph.suc graph node) ))
+  then return oldctx -- until we figure out a better way
+  else newctx >>= (\x -> return [(x,p'), (oldctx,1-p') ]) >>= Control.Monad.Random.fromList
+  where
+    randomBranches :: MonadRandom m => m [Maybe Graph.Node]
+    randomBranches = knuthShuffle $ take 3 $ (map Just $ map snd children) ++ [Nothing,Nothing,Nothing]
+    randomConditional = liftM mkConditional $ randomBranches
+    newctx = liftM  (\x -> (pre,node, oldLabel { computationType = x, timeout = Nothing },children)) randomConditional
 
 
-emptyWithProb :: MonadRandom m => Double -> [a] -> m [a]
-emptyWithProb p list = let p' = toRational p in Control.Monad.Random.fromList [ (list, p'), ([], (1 - p')) ]
+emptyWithProb :: MonadRandom m => Rational -> [a] -> m [a]
+emptyWithProb p' list = Control.Monad.Random.fromList [ (list, p'), ([], (1 - p')) ]
 
 -- caution: because I'm lazy and don't want to properly use tranformers, this is probably inefficient
-elemWithProb :: MonadRandom m => Double -> [a] -> m [a]
-elemWithProb _ [] = return []
+elemWithProb :: MonadRandom m => Rational -> [a] -> m [a]
+elemWithProb _ []     = return []
 elemWithProb p (e:es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProb p es)
 
-elemWithProbList :: MonadRandom m => [(a,Double)] -> m [a]
+elemWithProbList :: MonadRandom m => [(a,Rational)] -> m [a]
 elemWithProbList [] = return []
 elemWithProbList ((e,p):es) =  liftM2 (++) (emptyWithProb p [e]) (elemWithProbList es)
 
@@ -291,53 +306,54 @@ makeCodeGraph :: ComputationType -> LevelGraph -> CodeGraph
 makeCodeGraph ctype = Graph.nmap (\l -> CodeGraphNodeLabel l ctype Nothing)
 
 -- Makes a level graph into a code graph with a probability p for being a DataSource for every node
-makeRandomCodeGraph :: MonadRandom m => [Double] -> LevelGraph -> m CodeGraph
-makeRandomCodeGraph probsCT gr = liftM Graph.buildGr transformed
-    where
-      unfolded = Graph.ufold (:) [] gr
-      transformed = flip Control.Monad.mapM unfolded $ \ctx -> do ctype <- ctWithProb probsCT
-                                                                  return $ addCodeContext ctype Nothing ctx
+makeRandomCodeGraph :: (MonadRandom m, ReadConf m) => LevelGraph -> m CodeGraph
+makeRandomCodeGraph gr = liftM Graph.buildGr transformed
+  where
+    unfolded = Graph.ufold (:) [] gr
+    transformed = flip Control.Monad.mapM unfolded $ \ctx -> do ctype <- ctWithProb
+                                                                return $ addCodeContext ctype Nothing ctx
 
-makeCondCGWithProb :: MonadRandom m => Double -> CodeGraph -> m CodeGraph
-makeCondCGWithProb p gr =
-  liftM Graph.buildGr transformed
-    where
-      unfolded = Graph.ufold (:) [] gr
-      makeCond ::  MonadRandom m => Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
-      makeCond = \x@(_,node,_,_) -> if (null $ Graph.suc gr node) then return x else condWithProb p gr x
-      transformed = flip Control.Monad.mapM unfolded $ makeCond
+makeCondCGWithProb :: (ReadConf m, MonadRandom m) => CodeGraph -> m CodeGraph
+makeCondCGWithProb gr = do
+  p <- asks $ fromMaybe 0 . lookup ctIf . percentages
+  Graph.buildGr <$> mapM (makeCond p) unfolded
+  where
+    unfolded = Graph.ufold (:) [] gr
+    makeCond ::  MonadRandom m => Rational -> Graph.Context CodeGraphNodeLabel b -> m (Graph.Context CodeGraphNodeLabel b)
+    makeCond p x@(_,node,_,_) | null $ Graph.suc gr node = return x
+                              | otherwise = condWithProb p gr x
 
 
 makeGraphRooted ::  a -> Gr a () -> Gr a ()
 makeGraphRooted rootlabel graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootlabel)]) (oldEdges ++ newEdges)
 --makeGraphRooted _ graph  = newEdges
-    where
-      unocupied = (+1) $ snd $ Graph.nodeRange graph
-      oldEdges = Graph.labEdges graph
-      oldNodes = Graph.labNodes graph
-      oldNodes' = map fst $ Graph.labNodes graph
-      newEdges = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
+  where
+    unocupied = (+1) $ snd $ Graph.nodeRange graph
+    oldEdges = Graph.labEdges graph
+    oldNodes = Graph.labNodes graph
+    oldNodes' = map fst $ Graph.labNodes graph
+    newEdges = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
 
 
 makeGraphUnbalancedBigTree ::  CodeGraph -> CodeGraph
 makeGraphUnbalancedBigTree graph = Graph.mkGraph (oldNodes ++ [(unocupied,rootnodelabel)] ++ [bigsource]) (oldEdges ++ newEdges)
-    where
-      unocupied = (+1) $ snd $ Graph.nodeRange graph
-      startlvl =  (pred . minLevelCG) graph
-      rootnodelabel = CodeGraphNodeLabel startlvl OtherComputation Nothing
-      bigsource = (succ unocupied, CodeGraphNodeLabel (succ startlvl) SlowDataSource Nothing)
-      oldEdges = Graph.labEdges graph
-      oldNodes = Graph.labNodes graph
-      oldNodes' = map fst $ Graph.labNodes graph
-      newEdges' = [ (unocupied,node,()) | node <- oldNodes', (null $ Graph.pre graph node) ]
-      newEdges = (unocupied,unocupied+1,()):newEdges'
+  where
+    unocupied = succ $ snd $ Graph.nodeRange graph
+    startlvl =  (pred . minLevelCG) graph
+    rootnodelabel = CodeGraphNodeLabel startlvl "compute" Nothing
+    bigsource = (succ unocupied, CodeGraphNodeLabel (succ startlvl) "get-data-slow" Nothing)
+    oldEdges = Graph.labEdges graph
+    oldNodes = Graph.labNodes graph
+    oldNodes' = map fst $ Graph.labNodes graph
+    newEdges' = [ (unocupied,node,()) | node <- oldNodes', null $ Graph.pre graph node ]
+    newEdges = (unocupied,unocupied+1,()):newEdges'
 
 
 makeCGNodeTimed :: Int -> CodeGraphNodeLabel -> CodeGraphNodeLabel
 makeCGNodeTimed n node = node {timeout = Just n}
 
 makeCGNodeNamedFunction :: String -> CodeGraphNodeLabel -> CodeGraphNodeLabel
-makeCGNodeNamedFunction name node = node { computationType = NamedFunction name }
+makeCGNodeNamedFunction name node = node { computationType = Custom name }
 
 makeCodeGraphTimed :: Int -> CodeGraph  -> CodeGraph
 makeCodeGraphTimed = Graph.nmap . makeCGNodeTimed
@@ -397,56 +413,56 @@ joinLevelGraph g h = Graph.mkGraph (gNodes ++ hNodes') (gEdges ++ prodEdges ++ h
 -- Creates a subgraph of the join graph of g and h, where g and h are taken as is,
 -- and in the connection of both, an edge appears with fixed probability p. The appearences
 -- of different edges are (pseudo) stochastically independent
-joinGraphRandom :: MonadRandom m => Double -> Gr a () -> Gr a () -> m (Gr a ())
+joinGraphRandom :: MonadRandom m => Rational -> Gr a () -> Gr a () -> m (Gr a ())
 joinGraphRandom p g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes')) ((return gEdges) `rconcat` prodEdgesRand `rconcat` (return hEdges') )
-    where gNodes = Graph.labNodes g
-          newInt = if Graph.isEmpty g then 1 else (snd $ Graph.nodeRange g)
-          h' = intMap (+ newInt ) h -- move nodes from g to start at 1 + (maxnode h)
-          hNodes' = Graph.labNodes h'
-          gEdges = Graph.labEdges g
-          hEdges' = Graph.labEdges h'
-          prodEdgesRand = elemWithProb p $ List.nub [ (a,b,()) | (a,_) <-gNodes, (b,_) <- hNodes']
+  where
+    gNodes = Graph.labNodes g
+    newInt = if Graph.isEmpty g then 1 else (snd $ Graph.nodeRange g)
+    h' = intMap (+ newInt ) h -- move nodes from g to start at 1 + (maxnode h)
+    hNodes' = Graph.labNodes h'
+    gEdges = Graph.labEdges g
+    hEdges' = Graph.labEdges h'
+    prodEdgesRand = elemWithProb p $ List.nub [ (a,b,()) | (a,_) <-gNodes, (b,_) <- hNodes']
 
 -- Like joinGraphRandom, but an edge (v,w) can only appear if level v < level w
 -- It takes a map to get different probabilities for different level combinations
-joinLevelGraphRandom :: MonadRandom m => Map.Map (Int,Int) Double -> LevelGraph -> LevelGraph -> m LevelGraph
+joinLevelGraphRandom :: MonadRandom m => Map.Map (Int,Int) Rational -> LevelGraph -> LevelGraph -> m LevelGraph
 joinLevelGraphRandom pmap g h = (liftM2 Graph.mkGraph) (return (gNodes ++ hNodes')) ((return gEdges) `rconcat` prodEdgesRand `rconcat` (return hEdges') )
-    where gNodes = Graph.labNodes g
-          newInt = if Graph.isEmpty g then 1 else (snd $ Graph.nodeRange g)
-          h' = intMap (+ newInt ) h -- move nodes from g to start at 1 + (maxnode h)
-          hNodes' = Graph.labNodes h'
-          gEdges = Graph.labEdges g
-          hEdges' = Graph.labEdges h'
-          prodEdgesProb = List.nub $
-                          [((a,b,()), (pmap Map.! (l1,l2)))
-                           | (a,l1) <-gNodes,
-                           (b,l2) <- hNodes', l1<l2] ++
-                          [((a,b,()), (pmap Map.! (l1,l2)))
-                           | (a,l1) <-hNodes',
-                           (b,l2) <- gNodes, l1<l2]
-          prodEdgesRand = elemWithProbList prodEdgesProb
+  where
+    gNodes = Graph.labNodes g
+    newInt | Graph.isEmpty g = 1
+           | otherwise = snd $ Graph.nodeRange g
+    h' = intMap (+ newInt ) h -- move nodes from g to start at 1 + (maxnode h)
+    hNodes' = Graph.labNodes h'
+    gEdges = Graph.labEdges g
+    hEdges' = Graph.labEdges h'
+    prodEdgesProb =
+      List.nub
+        $ [((a,b,()), (pmap Map.! (l1,l2)))
+          | (a,l1) <- gNodes
+          , (b,l2) <- hNodes', l1<l2
+          ] ++
+          [((a,b,()), (pmap Map.! (l1,l2)))
+          | (a,l1) <- hNodes'
+          , (b,l2) <- gNodes, l1<l2
+          ]
+    prodEdgesRand = elemWithProbList prodEdgesProb
 
 
 
 
-genRandomCodeGraph :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
-genRandomCodeGraph _ cTypeProb [] = makeRandomCodeGraph cTypeProb (nullLevelGraph 1 1)
-genRandomCodeGraph probMap cTypeProb edgesPerLevel =
-  let
-      levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
-      levelGraph' = Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
-      levelGraph = Control.Monad.liftM2 makeGraphRooted (liftM (pred . minLevel) levelGraph') levelGraph'
-  in
-    levelGraph >>= (makeRandomCodeGraph cTypeProb)
-
-genRandomCodeGraphBigDS :: MonadRandom m => Map.Map (Int,Int) Double -> [Double] -> [Int] -> m CodeGraph
-genRandomCodeGraphBigDS _ cTypeProb [] = makeRandomCodeGraph cTypeProb (nullLevelGraph 1 1)
-genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel =
-  let
-      levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
-      levelGraph = Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
-      codeGraph' = levelGraph >>= (makeRandomCodeGraph cTypeProb)
-  in liftM makeGraphUnbalancedBigTree codeGraph'
+genRandomCodeGraph :: (ReadConf m, MonadRandom m) => Map.Map (Int,Int) Rational -> [Int] -> m CodeGraph
+genRandomCodeGraph _ [] = makeRandomCodeGraph (nullLevelGraph 1 1)
+genRandomCodeGraph probMap edgesPerLevel = do
+  let levelGraphList = zipWith nullLevelGraph [1..] edgesPerLevel
+  lg <- Control.Monad.foldM (joinLevelGraphRandom probMap) (nullLevelGraph 0 0) levelGraphList
+  withBDS <- asks includeBigDataSource
+  let rooted
+        | withBDS = lg
+        | otherwise = makeGraphRooted
+                       (pred $ minLevel lg) -- isn't this always 0 ??
+                       lg
+  (if withBDS then makeGraphUnbalancedBigTree else id) <$> makeRandomCodeGraph rooted
 
 -- makeCodeGraphRandomlyTimed :: MonadRandom m => Int -> CodeGraph  -> m CodeGraph
 -- makeCodeGraphRandomlyTimed n graph = liftM2 (flip Graph.nmap) (return graph) <=< makeTimed
@@ -458,16 +474,18 @@ genRandomCodeGraphBigDS probMap cTypeProb edgesPerLevel =
 
 makeCodeGraphRandomlyTimed :: MonadRandom m => Int -> CodeGraph  -> m CodeGraph
 makeCodeGraphRandomlyTimed n gr = liftM Graph.buildGr transformed
-    where
-      unfolded = Graph.ufold (:) [] gr
-      transformed = flip Control.Monad.mapM unfolded $ \ctx -> do newn <- getRandomR (1,n)
-                                                                  return $ (\(pre,node,label,after) -> (pre,node, makeCGNodeTimed newn label, after)) ctx
+  where
+    unfolded = Graph.ufold (:) [] gr
+    transformed = flip Control.Monad.mapM unfolded $ \ctx -> do newn <- getRandomR (1,n)
+                                                                return $ (\(pre,node,label,after) -> (pre,node, makeCGNodeTimed newn label, after)) ctx
 
 
 makeNestedCodeGraphRandomlyTimed :: forall m . MonadRandom m => Int -> NestedCodeGraph  -> m NestedCodeGraph
-makeNestedCodeGraphRandomlyTimed t (maingraph, subgraphs) = sequenceT ((makeCodeGraphRandomlyTimed t maingraph , mapM makeSubgraphRandomlyTimed subgraphs) :: (m CodeGraph, m CodeSubGraphs))
-    where makeSubgraphRandomlyTimed :: (CodeGraph, String, Arity) -> m (CodeGraph, String, Arity)
-          makeSubgraphRandomlyTimed (x,y, z) = (, y, z) <$> makeCodeGraphRandomlyTimed t x
+makeNestedCodeGraphRandomlyTimed t (maingraph, subgraphs) =
+  (,)
+    <$> makeCodeGraphRandomlyTimed t maingraph
+    <*> mapM makeSubgraphRandomlyTimed subgraphs
+  where makeSubgraphRandomlyTimed (x,y, z) = (, y, z) <$> makeCodeGraphRandomlyTimed t x
 -- nmapM :: (Graph.DynGraph gr, MonadRandom m) => (a -> m c) -> gr a b -> m (gr c b)
 -- nmapM f = gmapM (\(p,v,l,s)->(p,v,f l,s))
 --     where
@@ -481,27 +499,16 @@ nodeToUniqueName  =  (++) "local" . show
 ------------------------------------------------------------
 concatenateTests ::  (String -> NestedCodeGraph -> a) -> [ NestedCodeGraph ] -> [(String,a)]
 concatenateTests toCodeWrapped randomGraphs = resultStrings
-    where
-      randomGraphsNumbered = zip [0..] randomGraphs
-      totallevels = maximum $ map (levelsCGraph . fst) randomGraphs
-      genName = (\(x,y) -> ("run_test_level" ++ (show $ levelsCGraph $ fst y) ++ "_" ++ show (x `quot` totallevels)))
-      genCode = (\(x,y) -> toCodeWrapped (genName (x, y) ) y)
-      strings = map genCode randomGraphsNumbered
-      names = map genName randomGraphsNumbered
-      resultStrings = zip names strings
+  where
+    randomGraphsNumbered = zip [0..] randomGraphs
+    totallevels = maximum $ map (levelsCGraph . fst) randomGraphs
+    genName = (\(x,y) -> ("run_test_level" ++ (show $ levelsCGraph $ fst y) ++ "_" ++ show (x `quot` totallevels)))
+    genCode = (\(x,y) -> toCodeWrapped (genName (x, y) ) y)
+    strings = map genCode randomGraphsNumbered
+    names = map genName randomGraphsNumbered
+    resultStrings = zip names strings
 
 
-listTests ::  [ NestedCodeGraph ] -> String
-listTests randomGraphsTup = singleString
-    where
-      randomGraphs = map fst randomGraphsTup
-      randomGraphsNumbered = zip [0..] randomGraphs
-      totallevels = maximum $ map levelsCGraph randomGraphs
-      makeNameString (x,y) = "(run_test_level" ++ curLvlStr ++ "_" ++ curInstanceStr ++ ", " ++ curLvlStr ++ ", " ++ curInstanceStr ++ ")"
-          where curLvlStr = (show $ levelsCGraph y)
-                curInstanceStr =  show (x `quot` totallevels)
-      strings = map makeNameString randomGraphsNumbered
-      singleString = "[" ++ (List.intercalate ", " strings) ++ "]"
 
 -- ----------------
 --      TO-DO

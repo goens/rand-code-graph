@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Backends.Clojure where
 
-import           LevelGraphs as G
-import           Data.Maybe              (fromMaybe)
-import Data.Graph.Inductive    as Graph
 import           Backend.Language.Clojure as L
-import           Backend.Language.Common as L
-import Data.Default.Class
+import           Backend.Language.Common  as L
+import           Data.Default.Class
+import           Data.Graph.Inductive     as Graph
+import           Data.Maybe               (fromMaybe)
+import           LevelGraphs              as G
 
 
 toClojureCode :: String -> NestedCodeGraph -> Serialized
@@ -32,13 +32,8 @@ convertLevels getSuc lvls = mkLet assigns [finalExpr]
 toFunClj :: Graph.LNode CodeGraphNodeLabel -> [Expr] -> Expr
 toFunClj node@(n, CodeGraphNodeLabel _ lab _) children =
   case lab of
-    DataSource -> Form $ Sym "get-data" : children
-    SlowDataSource -> Form $ Sym "slow-get-data" : children
-    OtherComputation -> Form $ Sym "compute" : children
-    SideEffect -> Form $ Sym "write-data" : children
-    G.NamedFunction name -> Form $ Sym (Symbol name) : children
-    G.Function -> Form $ Sym (fnName n) : children
-    Map -> Form [Sym "count", Form [Sym "map", Sym (fnName n), Form $ Sym "vector" : children]]
+    Custom "function" -> Form $ Sym (fnName n) : children
+    Custom "map" -> Form [Sym "count", Form [Sym "map", Sym (fnName n), Form $ Sym "vector" : children]]
     Conditional cond true false -> mkIf (maybe (Bool True) mkRef cond) (maybe Nil mkRef true) (fmap mkRef false)
       where mkRef = Sym . varName
-    Rename name -> Sym $ Symbol name
+    Custom f -> Form $ Sym (Symbol f) : children

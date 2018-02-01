@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Backends.Muse where
 
-import           Backends.Clojure (toFunClj)
+import           Backend.Language.Clojure
+import           Backend.Language.Common
+import           Backends.Clojure         (toFunClj)
+import           Data.Default.Class
+import           Data.Graph.Inductive     as Graph
+import           Data.Maybe               (fromMaybe)
 import           LevelGraphs
-import           Data.Maybe           (fromMaybe)
-import Data.Graph.Inductive as Graph
-import Backend.Language.Clojure
-import Backend.Language.Common
-import Data.Default.Class
 
 
 
@@ -48,9 +48,8 @@ convertLevelsApp = convertLevelsWith $ \toFun fs -> [(Vect (map (Sym . varName .
 
 toFunMuse node@(n, CodeGraphNodeLabel _ lab _) children =
   case lab of
-    Map -> Form $ Sym "traverse": Sym (fnName n):children
+    Custom "map"      -> Form $ Sym "traverse": Sym (fnName n):children
     Conditional _ _ _ -> Form [Sym "return", defer]
-    Rename name -> Form [Sym "return", Sym $ Symbol name]
-    _ -> defer
+    _                 -> defer
   where
     defer = toFunClj node children
